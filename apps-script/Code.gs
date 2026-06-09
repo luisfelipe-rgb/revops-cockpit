@@ -383,6 +383,12 @@ function queryRetention_(w, filter) {
       m0m1:   safeDiv_(numOrNull_(r.n1), numOrNull_(r.d1)),
       m1m2:   safeDiv_(numOrNull_(r.n2), numOrNull_(r.d2)),
       m3plus: safeDiv_(numOrNull_(r.n3), numOrNull_(r.d3)),
+      // numeradores/denominadores brutos — o front usa pra linha Total exata
+      nd: {
+        n1: numOrNull_(r.n1), d1: numOrNull_(r.d1),
+        n2: numOrNull_(r.n2), d2: numOrNull_(r.d2),
+        n3: numOrNull_(r.n3), d3: numOrNull_(r.d3),
+      },
     };
   }).sort((a, b) => (b.m0Total || 0) - (a.m0Total || 0));
 
@@ -534,7 +540,7 @@ function queryRolloverMatrix_(w, filter) {
       channel: r.channel,
       values: [div(sports), div(casino), div(loteria), div(outros)],
       total: totalT != null ? div(totalT) : div(sports + casino + loteria),
-      _dep: dep,
+      weight: dep, // depósitos — o front usa pra linha Total ponderada
     };
   });
 
@@ -542,8 +548,7 @@ function queryRolloverMatrix_(w, filter) {
     list = list.filter(r => GROWTH_CHANNELS.indexOf(r.channel) >= 0);
   }
 
-  list.sort((a, b) => (b._dep || 0) - (a._dep || 0));
-  list.forEach(r => { delete r._dep; });
+  list.sort((a, b) => (b.weight || 0) - (a.weight || 0));
 
   return {
     columns: ['Sports', 'Casino', 'Loteria', 'Outros'],
