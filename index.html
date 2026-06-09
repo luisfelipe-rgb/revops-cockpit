@@ -466,6 +466,7 @@ function ChannelTable({ channels }) {
 
   // Canais sem mídia (spend null) não têm ROAS/CAC — mostram "—"
   const roas = (c) => (c.spend != null && c.spend > 0 ? c.ftdAmount / c.spend : null);
+  const roasD0 = (c) => (c.spend != null && c.spend > 0 && c.depD0 != null ? c.depD0 / c.spend : null);
   const cac = (c) => (c.spend != null && c.ftdQty > 0 ? c.spend / c.ftdQty : null);
   const ticket = (c) => (c.ftdQty > 0 ? c.ftdAmount / c.ftdQty : null);
 
@@ -482,8 +483,8 @@ function ChannelTable({ channels }) {
           <th>Investimento</th>
           <th>FTD (R$)</th>
           <th>FTD (qtd)</th>
-          <th>Dep. D0</th>
-          <th>ROAS</th>
+          <th>ROAS FTD</th>
+          <th>ROAS D0</th>
           <th>CAC</th>
           <th>Ticket Médio</th>
         </tr>
@@ -495,8 +496,8 @@ function ChannelTable({ channels }) {
             <td>{fmtBRL(c.spend)}</td>
             <td>{fmtBRL(c.ftdAmount)}</td>
             <td>{fmtQty(c.ftdQty)}</td>
-            <td>{fmtBRL(c.depD0)}</td>
             {roasCell(roas(c))}
+            {roasCell(roasD0(c))}
             <td>{fmtBRL(cac(c))}</td>
             <td>{fmtBRL(ticket(c))}</td>
           </tr>
@@ -508,8 +509,8 @@ function ChannelTable({ channels }) {
           <td>{fmtBRL(tot.spend)}</td>
           <td>{fmtBRL(tot.ftdAmount)}</td>
           <td>{fmtQty(tot.ftdQty)}</td>
-          <td>{fmtBRL(tot.depD0)}</td>
           {roasCell(tot.spend > 0 ? tot.ftdAmount / tot.spend : null)}
+          {roasCell(tot.spend > 0 ? tot.depD0 / tot.spend : null)}
           <td>{fmtBRL(tot.ftdQty > 0 ? tot.spend / tot.ftdQty : null)}</td>
           <td>{fmtBRL(tot.ftdQty > 0 ? tot.ftdAmount / tot.ftdQty : null)}</td>
         </tr>
