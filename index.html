@@ -322,16 +322,16 @@ const MOCK_M = {
 };
 
 // Mock — rollover por canal × tipo de jogo (modo dev). Live vem de payload.rolloverMatrix.
-// Verticais reais da player_metrics: esporte / casino / loteria (+ residual "Outros")
+// Verticais reais da player_metrics: valor_apostas_esporte / _casino / _loteria
 const MOCK_ROLLOVER_MATRIX = {
-  columns: ['Sports', 'Casino', 'Loteria', 'Outros'],
+  columns: ['Sports', 'Casino', 'Loteria'],
   rows: [
-    { channel: 'Meta',          values: [0.84, 1.02, 0.38, 0.11], total: 2.35, weight: 7800000 },
-    { channel: 'Google',        values: [0.95, 0.88, 0.45, 0.09], total: 2.37, weight: 5100000 },
-    { channel: 'TikTok',        values: [0.62, 1.18, 0.29, 0.08], total: 2.17, weight: 1900000 },
-    { channel: 'Kwai',          values: [0.51, 1.24, 0.22, 0.06], total: 2.03, weight: 800000 },
-    { channel: 'Afiliados',     values: [1.12, 0.74, 0.52, 0.10], total: 2.48, weight: 1500000 },
-    { channel: 'Orgânico (sem atribuição)', values: [0.98, 0.81, 0.41, 0.12], total: 2.32, weight: 3200000 },
+    { channel: 'Meta',          values: [0.84, 1.02, 0.38], total: 2.24, weight: 7800000 },
+    { channel: 'Google',        values: [0.95, 0.88, 0.45], total: 2.28, weight: 5100000 },
+    { channel: 'TikTok',        values: [0.62, 1.18, 0.29], total: 2.09, weight: 1900000 },
+    { channel: 'Kwai',          values: [0.51, 1.24, 0.22], total: 1.97, weight: 800000 },
+    { channel: 'Afiliados',     values: [1.12, 0.74, 0.52], total: 2.38, weight: 1500000 },
+    { channel: 'Orgânico (sem atribuição)', values: [0.98, 0.81, 0.41], total: 2.20, weight: 3200000 },
   ],
 };
 

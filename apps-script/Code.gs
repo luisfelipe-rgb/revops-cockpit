@@ -104,16 +104,21 @@ function esc_(s) {
   return String(s).replace(/'/g, "\\'");
 }
 
-// Classificação canônica de canal na player_metrics (utm de cadastro + afiliado)
+// Classificação canônica de canal na player_metrics (utm de cadastro + medium + afiliado).
+// Valores reais validados no schema (09/06/2026): source meta|google|ig|vazio;
+// 'ig' é Meta quando medium começa com 'paid', senão é Instagram orgânico (Social Media).
 function caseChannelExpr_() {
   return `CASE
-    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'meta|facebook|fb_|instagram|ig_') THEN 'Meta'
-    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'google|gads|adwords|youtube')     THEN 'Google'
-    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'tiktok')                          THEN 'TikTok'
-    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'kwai')                            THEN 'Kwai'
-    WHEN afiliado_nome IS NOT NULL AND afiliado_nome != ''                                           THEN 'Afiliados'
-    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'social|influencer|bio')           THEN 'Social Media'
-    WHEN utm_cadastro_source IS NULL OR utm_cadastro_source = ''                                     THEN 'Orgânico (sem atribuição)'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'meta|facebook|\\bfb\\b') THEN 'Meta'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'^ig$|instagram')
+         AND STARTS_WITH(LOWER(IFNULL(utm_cadastro_medium, '')), 'paid')                    THEN 'Meta'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'google|adwords|youtube') THEN 'Google'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'tiktok')                 THEN 'TikTok'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'kwai')                   THEN 'Kwai'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'^ig$|instagram')
+         OR LOWER(IFNULL(utm_cadastro_medium, '')) = 'social'                               THEN 'Social Media'
+    WHEN afiliado_nome IS NOT NULL AND afiliado_nome != ''                                  THEN 'Afiliados'
+    WHEN utm_cadastro_source IS NULL OR utm_cadastro_source = ''                            THEN 'Orgânico (sem atribuição)'
     ELSE 'Outros'
   END`;
 }
@@ -183,13 +188,15 @@ function buildPayload_(fromParam, toParam, filter) {
   const roasFtdLm  = safeDiv_(plm.ftd_amount,  plm.spend);
   const ggrPerDepMtd = safeDiv_(mtd.ngr, mtd.depositos);
   const ggrPerDepLm  = safeDiv_(lm.ngr,  lm.depositos);
-  const holdMtd = safeDiv_(mtd.ngr, pmtd.turnover);
-  const holdLm  = safeDiv_(lm.ngr,  plm.turnover);
+  // Turnover/Hold/Rollover da casa toda via player_metrics (valor_apostas_*) —
+  // mesma fonte de NGR/depósitos, então respeita o filtro de canal por inteiro
+  const holdMtd = safeDiv_(mtd.ngr, mtd.turnover);
+  const holdLm  = safeDiv_(lm.ngr,  lm.turnover);
   const ggrTrend = w.isNaturalMtd && mtd.ngr != null && w.daysElapsed
     ? mtd.ngr * (w.daysInMonth / w.daysElapsed)
     : null;
-  const rolloverMtd = safeDiv_(pmtd.turnover, mtd.depositos);
-  const rolloverLm  = safeDiv_(plm.turnover,  lm.depositos);
+  const rolloverMtd = safeDiv_(mtd.turnover, mtd.depositos);
+  const rolloverLm  = safeDiv_(lm.turnover,  lm.depositos);
 
   const M = {
     ftdAmount:  metric_('FTD Amount',  pmtd.ftd_amount, plm.ftd_amount, 'brl'),
@@ -204,7 +211,7 @@ function buildPayload_(fromParam, toParam, filter) {
     ggr:        metric_('GGR Total',      mtd.ngr, lm.ngr, 'brl'),
     ggrPerDep:  metric_('GGR / Depósito', ggrPerDepMtd, ggrPerDepLm, 'pct'),
     ggrTrend:   metric_('Close Trend GGR', ggrTrend, null, 'brl'),
-    turnover:   metric_('Turnover Total',           pmtd.turnover, plm.turnover, 'brl'),
+    turnover:   metric_('Turnover Total',           mtd.turnover, lm.turnover, 'brl'),
     hold:       metric_('Hold % (GGR / Turnover)',  holdMtd, holdLm, 'pct'),
     rollover:   metric_('Rollover (Turnover / Depósito)', rolloverMtd, rolloverLm, 'multiple'),
   };
@@ -261,14 +268,15 @@ function queryHouseAggregates_(w, filter) {
       SUM(ngr_total)                                      AS ngr,
       SUM(valor_depositos)                                AS depositos,
       COUNT(DISTINCT IF(qtd_depositos > 0, account_id, NULL)) AS depositantes_unicos,
-      SUM(valor_bonus)                                    AS bonus
+      SUM(valor_bonus)                                    AS bonus,
+      SUM(IFNULL(valor_apostas_casino, 0) + IFNULL(valor_apostas_esporte, 0) + IFNULL(valor_apostas_loteria, 0)) AS turnover
     FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
     WHERE data_ref BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
       ${pmWhere_(filter)}
     GROUP BY bucket
   `;
   const rows = runQuery_(sql);
-  return splitByWindow_(rows, ['ggr', 'ngr', 'depositos', 'depositantes_unicos', 'bonus']);
+  return splitByWindow_(rows, ['ggr', 'ngr', 'depositos', 'depositantes_unicos', 'bonus', 'turnover']);
 }
 
 function queryPerformanceAggregates_(w, filter) {
@@ -510,16 +518,14 @@ function queryDepM0_(w, filter) {
 
 function queryRolloverMatrix_(w, filter) {
   // Rollover (turnover/depósito) por canal × tipo de jogo — player_metrics.
-  // ATENÇÃO: nomes turnover_casino/esporte/loteria são palpite espelhando os
-  // splits de ggr_*. Se a query falhar, o erro aparece em meta.warnings.
+  // Turnover por vertical = valor_apostas_* (schema validado 09/06/2026).
   const sql = `
     SELECT
       ${caseChannelExpr_()} AS channel,
-      SUM(turnover_esporte) AS t_sports,
-      SUM(turnover_casino)  AS t_casino,
-      SUM(turnover_loteria) AS t_loteria,
-      SUM(turnover_total)   AS t_total,
-      SUM(valor_depositos)  AS depositos
+      SUM(valor_apostas_esporte) AS t_sports,
+      SUM(valor_apostas_casino)  AS t_casino,
+      SUM(valor_apostas_loteria) AS t_loteria,
+      SUM(valor_depositos)       AS depositos
     FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
     WHERE data_ref BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
       ${pmWhere_(filter)}
@@ -533,13 +539,11 @@ function queryRolloverMatrix_(w, filter) {
     const sports = numOrNull_(r.t_sports) || 0;
     const casino = numOrNull_(r.t_casino) || 0;
     const loteria = numOrNull_(r.t_loteria) || 0;
-    const totalT = numOrNull_(r.t_total);
-    const outros = totalT != null ? Math.max(totalT - sports - casino - loteria, 0) : 0;
     const div = (v) => (dep != null && dep > 0 ? v / dep : null);
     return {
       channel: r.channel,
-      values: [div(sports), div(casino), div(loteria), div(outros)],
-      total: totalT != null ? div(totalT) : div(sports + casino + loteria),
+      values: [div(sports), div(casino), div(loteria)],
+      total: div(sports + casino + loteria),
       weight: dep, // depósitos — o front usa pra linha Total ponderada
     };
   });
@@ -551,7 +555,7 @@ function queryRolloverMatrix_(w, filter) {
   list.sort((a, b) => (b.weight || 0) - (a.weight || 0));
 
   return {
-    columns: ['Sports', 'Casino', 'Loteria', 'Outros'],
+    columns: ['Sports', 'Casino', 'Loteria'],
     rows: list,
   };
 }
