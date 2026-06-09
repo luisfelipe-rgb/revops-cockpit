@@ -326,12 +326,12 @@ const MOCK_M = {
 const MOCK_ROLLOVER_MATRIX = {
   columns: ['Sports', 'Casino', 'Loteria', 'Outros'],
   rows: [
-    { channel: 'Meta',          values: [0.84, 1.02, 0.38, 0.11], total: 2.35 },
-    { channel: 'Google',        values: [0.95, 0.88, 0.45, 0.09], total: 2.37 },
-    { channel: 'TikTok',        values: [0.62, 1.18, 0.29, 0.08], total: 2.17 },
-    { channel: 'Kwai',          values: [0.51, 1.24, 0.22, 0.06], total: 2.03 },
-    { channel: 'Afiliados',     values: [1.12, 0.74, 0.52, 0.10], total: 2.48 },
-    { channel: 'Orgânico (sem atribuição)', values: [0.98, 0.81, 0.41, 0.12], total: 2.32 },
+    { channel: 'Meta',          values: [0.84, 1.02, 0.38, 0.11], total: 2.35, weight: 7800000 },
+    { channel: 'Google',        values: [0.95, 0.88, 0.45, 0.09], total: 2.37, weight: 5100000 },
+    { channel: 'TikTok',        values: [0.62, 1.18, 0.29, 0.08], total: 2.17, weight: 1900000 },
+    { channel: 'Kwai',          values: [0.51, 1.24, 0.22, 0.06], total: 2.03, weight: 800000 },
+    { channel: 'Afiliados',     values: [1.12, 0.74, 0.52, 0.10], total: 2.48, weight: 1500000 },
+    { channel: 'Orgânico (sem atribuição)', values: [0.98, 0.81, 0.41, 0.12], total: 2.32, weight: 3200000 },
   ],
 };
 
@@ -380,12 +380,12 @@ const MOCK_DEPM0_CHANNELS = [
 
 // Mock — retenção de valor por canal (modo dev). Live vem de payload.retentionChannels.
 const MOCK_RETENTION_CHANNELS = [
-  { channel: 'Meta',          m0Total: 4214000, m0m1: 0.243, m1m2: 0.548, m3plus: 0.612 },
-  { channel: 'Google',        m0Total: 2873000, m0m1: 0.281, m1m2: 0.575, m3plus: 0.655 },
-  { channel: 'Orgânico (sem atribuição)', m0Total: 1517000, m0m1: 0.352, m1m2: 0.681, m3plus: 0.742 },
-  { channel: 'TikTok',        m0Total: 1098000, m0m1: 0.194, m1m2: 0.492, m3plus: 0.518 },
-  { channel: 'Afiliados',     m0Total: 884000,  m0m1: 0.312, m1m2: 0.624, m3plus: 0.701 },
-  { channel: 'Kwai',          m0Total: 421000,  m0m1: 0.171, m1m2: 0.448, m3plus: 0.476 },
+  { channel: 'Meta',          m0Total: 4214000, m0m1: 0.243, m1m2: 0.548, m3plus: 0.612, nd: { n1: 0.243*3800000, d1: 3800000, n2: 0.548*920000, d2: 920000, n3: 0.612*480000, d3: 480000 } },
+  { channel: 'Google',        m0Total: 2873000, m0m1: 0.281, m1m2: 0.575, m3plus: 0.655, nd: { n1: 0.281*2600000, d1: 2600000, n2: 0.575*730000, d2: 730000, n3: 0.655*390000, d3: 390000 } },
+  { channel: 'Orgânico (sem atribuição)', m0Total: 1517000, m0m1: 0.352, m1m2: 0.681, m3plus: 0.742, nd: { n1: 0.352*1400000, d1: 1400000, n2: 0.681*490000, d2: 490000, n3: 0.742*310000, d3: 310000 } },
+  { channel: 'TikTok',        m0Total: 1098000, m0m1: 0.194, m1m2: 0.492, m3plus: 0.518, nd: { n1: 0.194*990000, d1: 990000, n2: 0.492*190000, d2: 190000, n3: 0.518*90000, d3: 90000 } },
+  { channel: 'Afiliados',     m0Total: 884000,  m0m1: 0.312, m1m2: 0.624, m3plus: 0.701, nd: { n1: 0.312*800000, d1: 800000, n2: 0.624*250000, d2: 250000, n3: 0.701*160000, d3: 160000 } },
+  { channel: 'Kwai',          m0Total: 421000,  m0m1: 0.171, m1m2: 0.448, m3plus: 0.476, nd: { n1: 0.171*380000, d1: 380000, n2: 0.448*65000, d2: 65000, n3: 0.476*28000, d3: 28000 } },
 ];
 
 const CLUSTER_GGR = [
@@ -638,6 +638,15 @@ function GgrChannelTable({ channels }) {
 // ============================================================
 
 function RolloverMatrix({ data }) {
+  // Total ponderado pelo depósito (weight) das linhas exibidas
+  const W = data.rows.reduce((a, r) => a + (r.weight || 0), 0);
+  const totCol = (j) => (W > 0
+    ? data.rows.reduce((a, r) => a + ((r.values[j] || 0) * (r.weight || 0)), 0) / W
+    : null);
+  const totAll = (W > 0
+    ? data.rows.reduce((a, r) => a + ((r.total || 0) * (r.weight || 0)), 0) / W
+    : null);
+
   return (
     <table className="ch-table">
       <thead>
@@ -656,6 +665,13 @@ function RolloverMatrix({ data }) {
           </tr>
         ))}
       </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          {data.columns.map((c, j) => <td key={j}>{fmtMultiple(totCol(j))}</td>)}
+          <td>{fmtMultiple(totAll)}</td>
+        </tr>
+      </tfoot>
     </table>
   );
 }
@@ -719,6 +735,15 @@ function DepM0Table({ channels }) {
 // ============================================================
 
 function RetentionTable({ channels }) {
+  // Total exato: soma numeradores/denominadores das linhas exibidas
+  const tot = channels.reduce((a, c) => {
+    const nd = c.nd || {};
+    ['n1','d1','n2','d2','n3','d3'].forEach(k => { a[k] += nd[k] || 0; });
+    a.m0 += c.m0Total || 0;
+    return a;
+  }, { n1: 0, d1: 0, n2: 0, d2: 0, n3: 0, d3: 0, m0: 0 });
+  const rate = (n, d) => (d > 0 ? n / d : null);
+
   return (
     <table className="ch-table">
       <thead>
@@ -741,6 +766,15 @@ function RetentionTable({ channels }) {
           </tr>
         ))}
       </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          <td>{fmtBRL(tot.m0)}</td>
+          <td>{fmtPct(rate(tot.n1, tot.d1))}</td>
+          <td>{fmtPct(rate(tot.n2, tot.d2))}</td>
+          <td>{fmtPct(rate(tot.n3, tot.d3))}</td>
+        </tr>
+      </tfoot>
     </table>
   );
 }
@@ -909,6 +943,62 @@ function fmtBR_(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// ============================================================
+// MOCK HERO FILTERING — no live o backend filtra de verdade;
+// no mock derivamos os heroes das tabelas mock pro preview reagir igual.
+// ============================================================
+function sumBy_(list, f) { return (list || []).reduce((a, c) => a + (f(c) || 0), 0); }
+
+function deriveMockM_(M, filter) {
+  if (!filter.channel && filter.scope !== 'growth') return M;
+  const pick = (list, isPaid) => filter.channel
+    ? list.filter(c => c.channel === filter.channel)
+    : list.filter(c => isPaid ? isPaid(c) : GROWTH_CHANNELS.indexOf(c.channel) >= 0);
+
+  const ch = pick(MOCK_CHANNELS, c => c.spend != null);
+  const gg = pick(MOCK_GGR_CHANNELS, c => c.spend != null);
+  const dp = pick(MOCK_DEPM0_CHANNELS, c => c.invest != null);
+  const rt = pick(MOCK_RETENTION_CHANNELS, null);
+  const rm = pick(MOCK_ROLLOVER_MATRIX.rows, null);
+
+  const ftd = sumBy_(ch, c => c.ftdAmount);
+  const spend = sumBy_(ch, c => c.spend);
+  const ggr = sumBy_(gg, c => c.ggr);
+  const depM0 = sumBy_(dp, c => c.depM0);
+  const depM0Growth = sumBy_(dp.filter(c => c.invest != null), c => c.depM0);
+  const ggrShare = sumBy_(MOCK_GGR_CHANNELS, c => c.ggr) > 0 ? ggr / sumBy_(MOCK_GGR_CHANNELS, c => c.ggr) : 1;
+  const depShare = sumBy_(MOCK_DEPM0_CHANNELS, c => c.depM0) > 0 ? depM0 / sumBy_(MOCK_DEPM0_CHANNELS, c => c.depM0) : 1;
+
+  const W = sumBy_(rt, c => c.m0Total);
+  const wavg = (key) => (W > 0 ? sumBy_(rt, c => (c[key] || 0) * (c.m0Total || 0)) / W : null);
+  const RW = sumBy_(rm, r => r.weight);
+  const rollover = RW > 0 ? sumBy_(rm, r => (r.total || 0) * (r.weight || 0)) / RW : null;
+
+  // set: novo act, escala m1 na mesma proporção (mantém o delta coerente no mock)
+  const set = (m, v) => {
+    const f = (m.act != null && m.act !== 0 && v != null) ? v / m.act : null;
+    return { ...m, act: v, m1: (f != null && m.m1 != null) ? m.m1 * f : m.m1 };
+  };
+  const scale = (m, f) => set(m, m.act != null ? m.act * f : null);
+
+  return {
+    ...M,
+    ftdAmount: set(M.ftdAmount, ftd || null),
+    roasFtd: set(M.roasFtd, spend > 0 ? ftd / spend : null),
+    invest: set(M.invest, spend > 0 ? spend : null),
+    ggr: set(M.ggr, ggr || null),
+    ggrTrend: scale(M.ggrTrend, ggrShare),
+    depTotal: scale(M.depTotal, depShare),
+    depM0Total: set(M.depM0Total, depM0 || null),
+    depM0Growth: set(M.depM0Growth, depM0Growth || null),
+    retM0M1: set(M.retM0M1, wavg('m0m1')),
+    retM1M2: set(M.retM1M2, wavg('m1m2')),
+    retM3plus: set(M.retM3plus, wavg('m3plus')),
+    turnover: scale(M.turnover, ggrShare),
+    rollover: set(M.rollover, rollover),
+  };
+}
+
 const PRESETS = [
   { id: 'mtd', label: 'MTD', range: () => ({ from: firstOfMonthISO_(), to: todayISO_() }) },
   { id: '7d',  label: '7d',  range: () => ({ from: daysAgoISO_(7), to: todayISO_() }) },
@@ -997,6 +1087,9 @@ function App() {
 
   // Opções do dropdown: nomes dos canais presentes no dado (sem filtro aplicado)
   const channelOptions = (state.channels || []).map(c => c.channel);
+
+  // Heroes: live = backend já filtrado · mock = deriva das tabelas mock
+  const displayM = state.isLive ? state.M : deriveMockM_(state.M, chFilter);
 
   function applyPreset(presetId) {
     const p = PRESETS.find(x => x.id === presetId);
@@ -1104,7 +1197,7 @@ function App() {
       </nav>
       <main>
         <Tab
-          M={state.M}
+          M={displayM}
           channels={fChannels}
           retentionChannels={fRetentionChannels}
           ggrChannels={fGgrChannels}
