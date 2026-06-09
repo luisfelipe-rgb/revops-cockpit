@@ -280,7 +280,9 @@ const { useState, useEffect } = React;
 // CONFIG — set this to your Apps Script web app URL to go live.
 // Quando `null`, o dashboard mostra o snapshot mock (modo dev).
 // ============================================================
-const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxZsHVVpkvnSuaq4A8rJpPfcL5-uRjIUdEtC5GfaeOBGsW973elDa-Vvunugz9Rjouy/exec';
+// Live endpoint — religar antes do push final (deixado em mock enquanto fechamos a visão):
+// const ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxZsHVVpkvnSuaq4A8rJpPfcL5-uRjIUdEtC5GfaeOBGsW973elDa-Vvunugz9Rjouy/exec';
+const ENDPOINT_URL = null;
 const ACCESS_TOKEN = 'rvops_5fa28e9c4b1d3a7f';
 
 // ============================================================
@@ -318,11 +320,15 @@ const CLUSTER_DEP = [
 ];
 
 // Mock — aquisição por canal (modo dev). Live vem de payload.channels.
+// spend: null = canal sem investimento de mídia (social/afiliados/orgânico)
 const MOCK_CHANNELS = [
-  { channel: 'Meta',   spend: 1842300, ftdQty: 14820, ftdAmount: 1058400 },
-  { channel: 'Google', spend: 1120800, ftdQty: 9640,  ftdAmount: 712300 },
-  { channel: 'TikTok', spend: 421500,  ftdQty: 4180,  ftdAmount: 268900 },
-  { channel: 'Kwai',   spend: 182525,  ftdQty: 2722,  ftdAmount: 103494 },
+  { channel: 'Meta',          spend: 1842300, ftdQty: 14820, ftdAmount: 1058400 },
+  { channel: 'Google',        spend: 1120800, ftdQty: 9640,  ftdAmount: 712300 },
+  { channel: 'TikTok',        spend: 421500,  ftdQty: 4180,  ftdAmount: 268900 },
+  { channel: 'Kwai',          spend: 182525,  ftdQty: 2722,  ftdAmount: 103494 },
+  { channel: 'Afiliados',     spend: null,    ftdQty: 3210,  ftdAmount: 224800 },
+  { channel: 'Social Media',  spend: null,    ftdQty: 1840,  ftdAmount: 96300 },
+  { channel: 'Orgânico (sem atribuição)', spend: null, ftdQty: 5420, ftdAmount: 318700 },
 ];
 
 const CLUSTER_GGR = [
@@ -457,8 +463,9 @@ function ChannelTable({ channels }) {
     ftdAmount: a.ftdAmount + (c.ftdAmount || 0),
   }), { spend: 0, ftdQty: 0, ftdAmount: 0 });
 
-  const roas = (c) => (c.spend > 0 ? c.ftdAmount / c.spend : null);
-  const cac = (c) => (c.ftdQty > 0 ? c.spend / c.ftdQty : null);
+  // Canais sem mídia (spend null) não têm ROAS/CAC — mostram "—"
+  const roas = (c) => (c.spend != null && c.spend > 0 ? c.ftdAmount / c.spend : null);
+  const cac = (c) => (c.spend != null && c.ftdQty > 0 ? c.spend / c.ftdQty : null);
   const ticket = (c) => (c.ftdQty > 0 ? c.ftdAmount / c.ftdQty : null);
 
   const roasCell = (r) => {
