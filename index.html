@@ -70,6 +70,14 @@
     color-scheme: dark;
   }
   .slicer input[type="date"]:focus { border-color: var(--accent); }
+  .slicer select {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-family: inherit; font-size: 12px;
+    padding: 6px 10px; border-radius: 6px; outline: none;
+    cursor: pointer; color-scheme: dark; max-width: 220px;
+  }
+  .slicer select:focus { border-color: var(--accent); }
+  .slicer-divider { width: 1px; height: 24px; background: var(--border); }
   .slicer-arrow { color: var(--text-dim); font-size: 12px; }
   .slicer-presets { display: flex; gap: 4px; margin-left: 6px; }
   .preset-btn {
@@ -314,8 +322,9 @@ const MOCK_M = {
 };
 
 // Mock — rollover por canal × tipo de jogo (modo dev). Live vem de payload.rolloverMatrix.
+// Verticais reais da player_metrics: esporte / casino / loteria (+ residual "Outros")
 const MOCK_ROLLOVER_MATRIX = {
-  columns: ['Sports', 'Slots', 'Live Casino', 'Outros'],
+  columns: ['Sports', 'Casino', 'Loteria', 'Outros'],
   rows: [
     { channel: 'Meta',          values: [0.84, 1.02, 0.38, 0.11], total: 2.35 },
     { channel: 'Google',        values: [0.95, 0.88, 0.45, 0.09], total: 2.37 },
@@ -325,6 +334,9 @@ const MOCK_ROLLOVER_MATRIX = {
     { channel: 'Orgânico (sem atribuição)', values: [0.98, 0.81, 0.41, 0.12], total: 2.32 },
   ],
 };
+
+// Canais Growth (mídia paga) — labels canônicos, usados pelo filtro client-side
+const GROWTH_CHANNELS = ['Meta', 'Google', 'TikTok', 'Kwai'];
 
 const CLUSTER_DEP = [
   { label: '% DEP Novos', value: 0.7196 },
@@ -910,6 +922,8 @@ function App() {
   const [pendingRange, setPendingRange] = useState(initialRange);
   const [appliedRange, setAppliedRange] = useState(initialRange);
   const [activePreset, setActivePreset] = useState('mtd');
+  // Filtro de canal: channel = canal específico · scope = 'all' (Total Casa) | 'growth' (Canais Growth)
+  const [chFilter, setChFilter] = useState({ channel: null, scope: 'all' });
   const [state, setState] = useState({
     loading: !!ENDPOINT_URL,
     error: null,
@@ -930,7 +944,9 @@ function App() {
   useEffect(() => {
     if (!ENDPOINT_URL) return;
     setState(prev => ({ ...prev, loading: true, error: null }));
-    const url = `${ENDPOINT_URL}?key=${ACCESS_TOKEN}&from=${appliedRange.from}&to=${appliedRange.to}`;
+    let url = `${ENDPOINT_URL}?key=${ACCESS_TOKEN}&from=${appliedRange.from}&to=${appliedRange.to}`;
+    if (chFilter.channel) url += `&channel=${encodeURIComponent(chFilter.channel)}`;
+    else if (chFilter.scope === 'growth') url += `&scope=growth`;
     fetch(url)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -959,7 +975,28 @@ function App() {
       .catch(err => {
         setState(prev => ({ ...prev, loading: false, error: String(err.message || err) }));
       });
-  }, [appliedRange.from, appliedRange.to]);
+  }, [appliedRange.from, appliedRange.to, chFilter.channel, chFilter.scope]);
+
+  // Filtro client-side (modo mock e redundância no live) das tabelas por canal
+  function filterByChannel(list, isPaid) {
+    if (!list) return list;
+    if (chFilter.channel) return list.filter(c => c.channel === chFilter.channel);
+    if (chFilter.scope === 'growth') {
+      return list.filter(c => isPaid ? isPaid(c) : GROWTH_CHANNELS.indexOf(c.channel) >= 0);
+    }
+    return list;
+  }
+
+  const fChannels = filterByChannel(state.channels, c => c.spend != null);
+  const fGgrChannels = filterByChannel(state.ggrChannels, c => c.spend != null);
+  const fDepM0Channels = filterByChannel(state.depM0Channels, c => c.invest != null);
+  const fRetentionChannels = filterByChannel(state.retentionChannels, null);
+  const fRolloverMatrix = state.rolloverMatrix
+    ? { ...state.rolloverMatrix, rows: filterByChannel(state.rolloverMatrix.rows, null) || [] }
+    : null;
+
+  // Opções do dropdown: nomes dos canais presentes no dado (sem filtro aplicado)
+  const channelOptions = (state.channels || []).map(c => c.channel);
 
   function applyPreset(presetId) {
     const p = PRESETS.find(x => x.id === presetId);
@@ -1025,6 +1062,33 @@ function App() {
             </button>
           ))}
         </div>
+        <div className="slicer-divider" />
+        <div className="slicer-group">
+          <label>Canal</label>
+          <select
+            value={chFilter.channel || ''}
+            onChange={e => setChFilter({ channel: e.target.value || null, scope: 'all' })}
+          >
+            <option value="">Todos</option>
+            {channelOptions.map((c, i) => <option key={i} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="slicer-presets">
+          <button
+            className={`preset-btn ${!chFilter.channel && chFilter.scope === 'growth' ? 'active' : ''}`}
+            onClick={() => setChFilter({ channel: null, scope: 'growth' })}
+            title="Só canais de mídia paga (Meta, Google, TikTok, Kwai)"
+          >
+            Canais Growth
+          </button>
+          <button
+            className={`preset-btn ${!chFilter.channel && chFilter.scope === 'all' ? 'active' : ''}`}
+            onClick={() => setChFilter({ channel: null, scope: 'all' })}
+            title="Casa toda, sem filtro de canal"
+          >
+            Total Casa
+          </button>
+        </div>
         <button className="apply-btn" disabled={!isDirty} onClick={applyManual}>Aplicar</button>
       </div>
       <nav className="tabs">
@@ -1041,15 +1105,11 @@ function App() {
       <main>
         <Tab
           M={state.M}
-          clusterDep={state.clusterDep}
-          clusterGgr={state.clusterGgr}
-          depComposition={state.depComposition}
-          verticals={state.verticals}
-          channels={state.channels}
-          retentionChannels={state.retentionChannels}
-          ggrChannels={state.ggrChannels}
-          depM0Channels={state.depM0Channels}
-          rolloverMatrix={state.rolloverMatrix}
+          channels={fChannels}
+          retentionChannels={fRetentionChannels}
+          ggrChannels={fGgrChannels}
+          depM0Channels={fDepM0Channels}
+          rolloverMatrix={fRolloverMatrix}
           isLive={state.isLive}
         />
         <div className="footer">
