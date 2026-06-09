@@ -116,6 +116,7 @@ function buildPayload_(fromParam, toParam) {
   const perfAgg   = safeQuery_('performance', () => queryPerformanceAggregates_(w), { mtd: {}, lm: {} }, warnings);
   const retention = safeQuery_('retention',   () => queryRetention_(w),             { m0m1: null, m1m2: null, m3plus: null }, warnings);
   const verticals = safeQuery_('verticals',   () => queryVerticals_(w),             null, warnings);
+  const channels  = safeQuery_('channels',    () => queryChannels_(w),              null, warnings);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
@@ -182,6 +183,7 @@ function buildPayload_(fromParam, toParam) {
     clusterGgr: null,     // GGR/Dep por safra — pendente
     depComposition: null, // Novos / Recorrentes / Reativados em R$ — pendente
     verticals: verticals, // GGR por vertical (casino / esporte / loteria) — de player_metrics
+    channels: channels,   // breakdown de aquisição por canal (platform) — tbl_performance_daily
   };
 }
 
@@ -299,6 +301,30 @@ function queryVerticals_(w) {
     { label: 'Esporte', value: esporte / total, amount: esporte },
     { label: 'Loteria', value: loteria / total, amount: loteria },
   ].sort((a, b) => b.value - a.value);
+}
+
+function queryChannels_(w) {
+  // Aquisição por canal (platform) no período. Front calcula ROAS/CAC/ticket.
+  const sql = `
+    SELECT
+      COALESCE(NULLIF(platform, ''), 'Outros') AS channel,
+      SUM(spend)      AS spend,
+      SUM(qtd_ftd)    AS ftd_qty,
+      SUM(amount_ftd) AS ftd_amount
+    FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
+    WHERE report_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
+    GROUP BY channel
+    HAVING SUM(spend) > 0 OR SUM(qtd_ftd) > 0
+    ORDER BY spend DESC
+  `;
+  const rows = runQuery_(sql);
+  if (!rows.length) return null;
+  return rows.map(r => ({
+    channel:   r.channel,
+    spend:     numOrNull_(r.spend),
+    ftdQty:    numOrNull_(r.ftd_qty),
+    ftdAmount: numOrNull_(r.ftd_amount),
+  }));
 }
 
 // ============================================================
