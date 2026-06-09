@@ -142,6 +142,9 @@ function buildPayload_(fromParam, toParam) {
   const ggrTrend = w.isNaturalMtd && mtd.ngr != null && w.daysElapsed
     ? mtd.ngr * (w.daysInMonth / w.daysElapsed)
     : null;
+  // Rollover = Turnover / Depósitos — quantas vezes o depósito vira aposta
+  const rolloverMtd = safeDiv_(pmtd.turnover, mtd.depositos);
+  const rolloverLm  = safeDiv_(plm.turnover,  lm.depositos);
 
   const M = {
     // AQUISIÇÃO
@@ -163,7 +166,7 @@ function buildPayload_(fromParam, toParam) {
     // TURNOVER
     turnover:   metric_('Turnover Total',           pmtd.turnover, plm.turnover, 'brl'),
     hold:       metric_('Hold % (GGR / Turnover)',  holdMtd, holdLm, 'pct'),
-    bettors:    metric_('Apostadores Ativos',       mtd.depositantes_unicos, lm.depositantes_unicos, 'qty'),
+    rollover:   metric_('Rollover (Turnover / Depósito)', rolloverMtd, rolloverLm, 'multiple'),
   };
 
   return {
@@ -190,6 +193,7 @@ function buildPayload_(fromParam, toParam) {
     retentionChannels: retention.channels, // retenção de valor por canal — cohort wide monthly
     ggrChannels: ggrChannels, // GGR (ngr_total) + ROAS GGR por canal — player_metrics + performance
     depM0Channels: depM0.channels, // DEP M0 por canal — vw_cohort_deposito_amount_wide_monthly
+    rolloverMatrix: null, // TODO: canal × tipo de jogo — aguardando schema de vw_cohort_turnover_cassino_e_sport_wide_monthly
   };
 }
 
