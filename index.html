@@ -310,7 +310,20 @@ const MOCK_M = {
   // APOSTAS (MOCK)
   turnover:    { act: 24850000, bp: 32500000, m1: 11200000, pctBp: 0.7646, fmt: 'brl', label: 'Turnover Total' },
   hold:        { act: 0.0609,   bp: 0.0750,   m1: 0.0610,   pctBp: 0.8120, fmt: 'pct', label: 'Hold % (GGR / Turnover)' },
-  bettors:     { act: 28430,    bp: 35000,    m1: 9820,     pctBp: 0.8123, fmt: 'qty', label: 'Apostadores Ativos' },
+  rollover:    { act: 2.27,     bp: 2.50,     m1: 2.34,     pctBp: 0.9080, fmt: 'multiple', label: 'Rollover (Turnover / Depósito)' },
+};
+
+// Mock — rollover por canal × tipo de jogo (modo dev). Live vem de payload.rolloverMatrix.
+const MOCK_ROLLOVER_MATRIX = {
+  columns: ['Sports', 'Slots', 'Live Casino', 'Outros'],
+  rows: [
+    { channel: 'Meta',          values: [0.84, 1.02, 0.38, 0.11], total: 2.35 },
+    { channel: 'Google',        values: [0.95, 0.88, 0.45, 0.09], total: 2.37 },
+    { channel: 'TikTok',        values: [0.62, 1.18, 0.29, 0.08], total: 2.17 },
+    { channel: 'Kwai',          values: [0.51, 1.24, 0.22, 0.06], total: 2.03 },
+    { channel: 'Afiliados',     values: [1.12, 0.74, 0.52, 0.10], total: 2.48 },
+    { channel: 'Orgânico (sem atribuição)', values: [0.98, 0.81, 0.41, 0.12], total: 2.32 },
+  ],
 };
 
 const CLUSTER_DEP = [
@@ -609,6 +622,33 @@ function GgrChannelTable({ channels }) {
 }
 
 // ============================================================
+// ROLLOVER MATRIX — rollover (turnover/depósito) por canal × tipo de jogo
+// ============================================================
+
+function RolloverMatrix({ data }) {
+  return (
+    <table className="ch-table">
+      <thead>
+        <tr>
+          <th>Canal</th>
+          {data.columns.map((c, i) => <th key={i}>{c}</th>)}
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {data.rows.map((r, i) => (
+          <tr key={i}>
+            <td className="ch-name">{r.channel}</td>
+            {r.values.map((v, j) => <td key={j}>{fmtMultiple(v)}</td>)}
+            <td style={{ fontWeight: 700 }}>{fmtMultiple(r.total)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// ============================================================
 // DEP M0 TABLE — depósito da safra atual por canal
 //   ROAS M0 = DEP M0 ÷ Investimento
 // ============================================================
@@ -793,25 +833,25 @@ function TabGgr({ M, ggrChannels }) {
   );
 }
 
-function TabApostas({ M, verticals, isLive }) {
+function TabApostas({ M, rolloverMatrix, isLive }) {
   return (
     <React.Fragment>
       <div className="tab-header">
         <div>
           <h1>Turnover</h1>
-          <div className="subtitle">Volume apostado, margem da casa e apostadores ativos</div>
+          <div className="subtitle">Volume apostado, margem da casa e rollover</div>
         </div>
         {!isLive && <span className="mock-chip">Dados mock</span>}
       </div>
       <div className="hero-grid">
         <Hero metric={M.turnover} />
         <Hero metric={M.hold} />
-        <Hero metric={M.bettors} />
+        <Hero metric={M.rollover} />
       </div>
-      {verticals && (
+      {rolloverMatrix && rolloverMatrix.rows && rolloverMatrix.rows.length > 0 && (
         <div className="support">
-          <div className="support-title">GGR por Vertical</div>
-          <HBarList items={verticals} valueFmt="pct" />
+          <div className="support-title">Rollover por Canal × Tipo de Jogo</div>
+          <RolloverMatrix data={rolloverMatrix} />
         </div>
       )}
     </React.Fragment>
@@ -883,6 +923,7 @@ function App() {
     retentionChannels: MOCK_RETENTION_CHANNELS,
     ggrChannels: MOCK_GGR_CHANNELS,
     depM0Channels: MOCK_DEPM0_CHANNELS,
+    rolloverMatrix: MOCK_ROLLOVER_MATRIX,
     isLive: false,
   });
 
@@ -911,6 +952,7 @@ function App() {
           retentionChannels: payload.retentionChannels,
           ggrChannels: payload.ggrChannels,
           depM0Channels: payload.depM0Channels,
+          rolloverMatrix: payload.rolloverMatrix,
           isLive: true,
         }));
       })
@@ -1007,6 +1049,7 @@ function App() {
           retentionChannels={state.retentionChannels}
           ggrChannels={state.ggrChannels}
           depM0Channels={state.depM0Channels}
+          rolloverMatrix={state.rolloverMatrix}
           isLive={state.isLive}
         />
         <div className="footer">
