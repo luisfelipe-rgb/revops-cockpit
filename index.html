@@ -182,6 +182,34 @@
   }
   .delta-m1 .up { color: var(--positive); }
   .delta-m1 .down { color: var(--negative); }
+  /* Channel table */
+  .ch-table {
+    width: 100%; border-collapse: collapse;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .ch-table th, .ch-table td {
+    padding: 11px 16px; text-align: right;
+    font-size: 12px; border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .ch-table th:first-child, .ch-table td:first-child {
+    text-align: left; min-width: 90px;
+  }
+  .ch-table thead th {
+    background: var(--surface-2); color: var(--text-muted);
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    font-weight: 600;
+  }
+  .ch-table tbody tr:hover { background: rgba(255,255,255,.02); }
+  .ch-table tbody tr:last-child td { border-bottom: none; }
+  .ch-table tfoot td {
+    background: var(--surface-2); font-weight: 700;
+    color: var(--text); border-top: 1px solid var(--border-strong);
+  }
+  .ch-name { color: var(--text); font-weight: 600; }
+  .ch-roas-pos { color: var(--positive); font-weight: 600; }
+  .ch-roas-neg { color: var(--negative); font-weight: 600; }
   /* Supporting section */
   .support {
     margin-top: 8px;
@@ -287,6 +315,14 @@ const CLUSTER_DEP = [
   { label: '% DEP Novos', value: 0.7196 },
   { label: '% DEP Recorrentes', value: 0.2350 },
   { label: '% DEP Reativados', value: 0.1156 },
+];
+
+// Mock — aquisição por canal (modo dev). Live vem de payload.channels.
+const MOCK_CHANNELS = [
+  { channel: 'Meta',   spend: 1842300, ftdQty: 14820, ftdAmount: 1058400 },
+  { channel: 'Google', spend: 1120800, ftdQty: 9640,  ftdAmount: 712300 },
+  { channel: 'TikTok', spend: 421500,  ftdQty: 4180,  ftdAmount: 268900 },
+  { channel: 'Kwai',   spend: 182525,  ftdQty: 2722,  ftdAmount: 103494 },
 ];
 
 const CLUSTER_GGR = [
@@ -409,10 +445,73 @@ function HBarList({ items, valueFmt = 'brl' }) {
 }
 
 // ============================================================
-// TABS — 3 KPIs hero + 1 viz só
+// CHANNEL TABLE — análise de aquisição por canal
+//   ROAS = FTD R$ / Investimento · CAC = Investimento / FTD qtd · Ticket = FTD R$ / FTD qtd
 // ============================================================
 
-function TabAquisicao({ M, clusterDep }) {
+function ChannelTable({ channels }) {
+  // Totais pra linha de rodapé
+  const tot = channels.reduce((a, c) => ({
+    spend: a.spend + (c.spend || 0),
+    ftdQty: a.ftdQty + (c.ftdQty || 0),
+    ftdAmount: a.ftdAmount + (c.ftdAmount || 0),
+  }), { spend: 0, ftdQty: 0, ftdAmount: 0 });
+
+  const roas = (c) => (c.spend > 0 ? c.ftdAmount / c.spend : null);
+  const cac = (c) => (c.ftdQty > 0 ? c.spend / c.ftdQty : null);
+  const ticket = (c) => (c.ftdQty > 0 ? c.ftdAmount / c.ftdQty : null);
+
+  const roasCell = (r) => {
+    if (r == null) return <td>—</td>;
+    return <td className={r >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(r)}</td>;
+  };
+
+  return (
+    <table className="ch-table">
+      <thead>
+        <tr>
+          <th>Canal</th>
+          <th>Investimento</th>
+          <th>FTD (R$)</th>
+          <th>FTD (qtd)</th>
+          <th>ROAS</th>
+          <th>CAC</th>
+          <th>Ticket Médio</th>
+        </tr>
+      </thead>
+      <tbody>
+        {channels.map((c, i) => (
+          <tr key={i}>
+            <td className="ch-name">{c.channel}</td>
+            <td>{fmtBRL(c.spend)}</td>
+            <td>{fmtBRL(c.ftdAmount)}</td>
+            <td>{fmtQty(c.ftdQty)}</td>
+            {roasCell(roas(c))}
+            <td>{fmtBRL(cac(c))}</td>
+            <td>{fmtBRL(ticket(c))}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          <td>{fmtBRL(tot.spend)}</td>
+          <td>{fmtBRL(tot.ftdAmount)}</td>
+          <td>{fmtQty(tot.ftdQty)}</td>
+          {roasCell(tot.spend > 0 ? tot.ftdAmount / tot.spend : null)}
+          <td>{fmtBRL(tot.ftdQty > 0 ? tot.spend / tot.ftdQty : null)}</td>
+          <td>{fmtBRL(tot.ftdQty > 0 ? tot.ftdAmount / tot.ftdQty : null)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+// ============================================================
+// TABS — 3 KPIs hero + viz de apoio
+// ============================================================
+
+function TabAquisicao({ M, channels }) {
   return (
     <React.Fragment>
       <div className="tab-header">
@@ -426,10 +525,10 @@ function TabAquisicao({ M, clusterDep }) {
         <Hero metric={M.roasFtd} />
         <Hero metric={M.invest} />
       </div>
-      {clusterDep && (
+      {channels && channels.length > 0 && (
         <div className="support">
-          <div className="support-title">Composição da Base — % Depósitos</div>
-          <HBarList items={clusterDep} valueFmt="pct" />
+          <div className="support-title">Análise por Canal</div>
+          <ChannelTable channels={channels} />
         </div>
       )}
     </React.Fragment>
@@ -588,6 +687,7 @@ function App() {
     clusterGgr: CLUSTER_GGR,
     depComposition: MOCK_DEP_COMPOSITION,
     verticals: VERTICALS,
+    channels: MOCK_CHANNELS,
     isLive: false,
   });
 
@@ -612,6 +712,7 @@ function App() {
           clusterGgr: payload.clusterGgr,
           depComposition: payload.depComposition,
           verticals: payload.verticals,
+          channels: payload.channels,
           isLive: true,
         }));
       })
@@ -704,6 +805,7 @@ function App() {
           clusterGgr={state.clusterGgr}
           depComposition={state.depComposition}
           verticals={state.verticals}
+          channels={state.channels}
           isLive={state.isLive}
         />
         <div className="footer">
