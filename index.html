@@ -252,7 +252,8 @@ const { useState, useEffect } = React;
 // CONFIG — set this to your Apps Script web app URL to go live.
 // Quando `null`, o dashboard mostra o snapshot mock (modo dev).
 // ============================================================
-const ENDPOINT_URL = null;
+const ENDPOINT_URL = 'https://script.google.com/a/macros/apostou.bet.br/s/AKfycbwQgwgi4zZCe2cBvdXXRPCQgGO-FQJheAv1EeWEsTuflSnxbMpVN_iQUVgnsjF7vwE/exec';
+const ACCESS_TOKEN = 'rvops_5fa28e9c4b1d3a7f';
 
 // ============================================================
 // MOCK DATA — Farol snapshot (22/05/2026) — usado enquanto ENDPOINT_URL = null
@@ -593,8 +594,8 @@ function App() {
   useEffect(() => {
     if (!ENDPOINT_URL) return;
     setState(prev => ({ ...prev, loading: true, error: null }));
-    const url = `${ENDPOINT_URL}?from=${appliedRange.from}&to=${appliedRange.to}`;
-    fetch(url, { credentials: 'include' })
+    const url = `${ENDPOINT_URL}?key=${ACCESS_TOKEN}&from=${appliedRange.from}&to=${appliedRange.to}`;
+    fetch(url)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

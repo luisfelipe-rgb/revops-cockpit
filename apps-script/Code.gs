@@ -8,6 +8,9 @@
 const PROJECT_ID = 'db-clickhouse';
 const TZ = 'America/Sao_Paulo';
 const CACHE_TTL_SECONDS = 15 * 60; // 15 min — cohort queries are expensive
+// Token "público" — visível no index.html do repo público. Não é segredo forte,
+// só evita varredura. Rotaciona aqui + no index.html quando quiser.
+const ACCESS_TOKEN = 'rvops_5fa28e9c4b1d3a7f';
 
 // ============================================================
 // ENTRY POINT
@@ -16,6 +19,14 @@ const CACHE_TTL_SECONDS = 15 * 60; // 15 min — cohort queries are expensive
 function doGet(e) {
   try {
     const params = (e && e.parameter) || {};
+
+    // Token check — endpoint deployado como "Anyone", protegido só pela chave
+    if (params.key !== ACCESS_TOKEN) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ error: 'Unauthorized — missing or invalid key' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const refresh = params.refresh === 'true';
     const fromParam = params.from || null;  // YYYY-MM-DD
     const toParam = params.to || null;      // YYYY-MM-DD
@@ -189,7 +200,7 @@ function safeDiv_(a, b) {
 function queryHouseAggregates_(w) {
   const sql = `
     SELECT
-      IF(data_ref BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS window,
+      IF(data_ref BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS bucket,
       SUM(ggr_total)                                      AS ggr,
       SUM(ngr_total)                                      AS ngr,
       SUM(valor_depositos)                                AS depositos,
@@ -197,7 +208,7 @@ function queryHouseAggregates_(w) {
       SUM(valor_bonus)                                    AS bonus
     FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
     WHERE data_ref BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
-    GROUP BY window
+    GROUP BY bucket
   `;
   const rows = runQuery_(sql);
   return splitByWindow_(rows, ['ggr', 'ngr', 'depositos', 'depositantes_unicos', 'bonus']);
@@ -206,14 +217,14 @@ function queryHouseAggregates_(w) {
 function queryPerformanceAggregates_(w) {
   const sql = `
     SELECT
-      IF(report_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS window,
+      IF(report_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS bucket,
       SUM(spend)               AS spend,
       SUM(qtd_ftd)             AS ftd_qty,
       SUM(amount_ftd)          AS ftd_amount,
       SUM(amount_deposito_d0)  AS dep_d0
     FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
     WHERE report_date BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
-    GROUP BY window
+    GROUP BY bucket
   `;
   const rows = runQuery_(sql);
   return splitByWindow_(rows, ['spend', 'ftd_qty', 'ftd_amount', 'dep_d0']);
@@ -224,11 +235,11 @@ function queryFtdBaseAggregates_(w) {
   // SUM(turnover_total) WHERE days_since_ftd = 0 == turnover total naquele dia (evita dupla contagem)
   const sql = `
     SELECT
-      IF(periodo BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS window,
+      IF(periodo BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS bucket,
       SUM(IF(days_since_ftd = 0, turnover_total, 0)) AS turnover
     FROM \`${PROJECT_ID}.analytics_cohorts.tbl_cohort_ftd_base\`
     WHERE periodo BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
-    GROUP BY window
+    GROUP BY bucket
   `;
   const rows = runQuery_(sql);
   return splitByWindow_(rows, ['turnover']);
@@ -309,8 +320,8 @@ function splitByWindow_(rows, numericKeys) {
   const out = { mtd: {}, lm: {} };
   numericKeys.forEach(k => { out.mtd[k] = 0; out.lm[k] = 0; });
   rows.forEach(r => {
-    const bucket = r.window === 'mtd' ? out.mtd : out.lm;
-    numericKeys.forEach(k => { bucket[k] = numOrNull_(r[k]); });
+    const target = r.bucket === 'mtd' ? out.mtd : out.lm;
+    numericKeys.forEach(k => { target[k] = numOrNull_(r[k]); });
   });
   return out;
 }
