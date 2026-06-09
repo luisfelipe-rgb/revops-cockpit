@@ -109,9 +109,13 @@ function parseISO_(s) {
 
 function buildPayload_(fromParam, toParam) {
   const w = windows_(fromParam, toParam);
-  const houseAgg = queryHouseAggregates_(w);
-  const perfAgg = queryPerformanceAggregates_(w);
-  const retention = queryRetention_(w);
+  // Cada query blindada: se uma falhar (coluna errada etc.), só ela vira fallback,
+  // o resto do payload continua. Erros ficam em meta.warnings pra debug.
+  const warnings = [];
+  const houseAgg  = safeQuery_('house',       () => queryHouseAggregates_(w),       { mtd: {}, lm: {} }, warnings);
+  const perfAgg   = safeQuery_('performance', () => queryPerformanceAggregates_(w), { mtd: {}, lm: {} }, warnings);
+  const retention = safeQuery_('retention',   () => queryRetention_(w),             { m0m1: null, m1m2: null, m3plus: null }, warnings);
+  const verticals = safeQuery_('verticals',   () => queryVerticals_(w),             null, warnings);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
@@ -170,13 +174,14 @@ function buildPayload_(fromParam, toParam) {
       isNaturalMtd: w.isNaturalMtd,
       generatedAt: new Date().toISOString(),
       source: 'BigQuery — live via Apps Script',
+      warnings: warnings.length ? warnings : undefined,
     },
     metrics: M,
-    // Vizs de apoio — placeholders por enquanto, próximos passos
-    clusterDep: null,     // % Novos / Recorrentes / Reativados — virá das cohort wide views
-    clusterGgr: null,     // GGR/Dep por safra
-    depComposition: null, // Novos / Recorrentes / Reativados em R$
-    verticals: null,      // Sports / Slots / Live — precisa coluna de vertical em player_metrics ou turnover view
+    // Vizs de apoio
+    clusterDep: null,     // % Novos / Recorrentes / Reativados — pendente (cohort wide)
+    clusterGgr: null,     // GGR/Dep por safra — pendente
+    depComposition: null, // Novos / Recorrentes / Reativados em R$ — pendente
+    verticals: verticals, // GGR por vertical (casino / esporte / loteria) — de player_metrics
   };
 }
 
@@ -188,6 +193,16 @@ function metric_(label, act, m1, fmt) {
 function safeDiv_(a, b) {
   if (a == null || b == null || b === 0) return null;
   return a / b;
+}
+
+// Roda uma query e devolve fallback se ela estourar; registra o erro em warnings.
+function safeQuery_(name, fn, fallback, warnings) {
+  try {
+    return fn();
+  } catch (err) {
+    warnings.push(`${name}: ${String(err && err.message || err)}`);
+    return fallback;
+  }
 }
 
 // ============================================================
@@ -260,6 +275,30 @@ function queryRetention_(w) {
     m1m2:   numOrNull_(r.m1m2),
     m3plus: numOrNull_(r.m3plus),
   };
+}
+
+function queryVerticals_(w) {
+  // GGR por vertical no período (MTD). player_metrics tem ggr_casino / ggr_esporte / ggr_loteria.
+  const sql = `
+    SELECT
+      SUM(ggr_casino)  AS casino,
+      SUM(ggr_esporte) AS esporte,
+      SUM(ggr_loteria) AS loteria
+    FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
+    WHERE data_ref BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
+  `;
+  const r = runQuery_(sql)[0] || {};
+  const casino = numOrNull_(r.casino) || 0;
+  const esporte = numOrNull_(r.esporte) || 0;
+  const loteria = numOrNull_(r.loteria) || 0;
+  const total = casino + esporte + loteria;
+  if (total <= 0) return null;
+  // Front-end espera { label, value(0..1), amount } e ordena por value
+  return [
+    { label: 'Casino',  value: casino / total,  amount: casino },
+    { label: 'Esporte', value: esporte / total, amount: esporte },
+    { label: 'Loteria', value: loteria / total, amount: loteria },
+  ].sort((a, b) => b.value - a.value);
 }
 
 // ============================================================
