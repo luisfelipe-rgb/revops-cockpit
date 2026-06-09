@@ -331,6 +331,18 @@ const MOCK_CHANNELS = [
   { channel: 'Orgânico (sem atribuição)', spend: null, ftdQty: 5420, ftdAmount: 318700, depD0: 540900 },
 ];
 
+// Mock — GGR por canal (modo dev). Live vem de payload.ggrChannels.
+// "GGR" do negócio = ngr_total da player_metrics (regra Apostou).
+const MOCK_GGR_CHANNELS = [
+  { channel: 'Meta',          ggr: 612400, spend: 1842300, freespin: 48200 },
+  { channel: 'Google',        ggr: 488100, spend: 1120800, freespin: 31500 },
+  { channel: 'TikTok',        ggr: 156800, spend: 421500,  freespin: 14800 },
+  { channel: 'Kwai',          ggr: -12400, spend: 182525,  freespin: 6200 },
+  { channel: 'Orgânico (sem atribuição)', ggr: 269400, spend: null, freespin: 22900 },
+  { channel: 'Afiliados',     ggr: 121700, spend: null, freespin: 9800 },
+  { channel: 'Social Media',  ggr: 54300,  spend: null, freespin: 4100 },
+];
+
 // Mock — retenção de valor por canal (modo dev). Live vem de payload.retentionChannels.
 const MOCK_RETENTION_CHANNELS = [
   { channel: 'Meta',          m0Total: 4214000, m0m1: 0.243, m1m2: 0.548, m3plus: 0.612 },
@@ -530,6 +542,63 @@ function ChannelTable({ channels }) {
 }
 
 // ============================================================
+// GGR CHANNEL TABLE — GGR, ROAS GGR e FreeSpins por canal
+//   ROAS GGR = GGR ÷ Investimento
+// ============================================================
+
+function GgrChannelTable({ channels }) {
+  const tot = channels.reduce((a, c) => ({
+    ggr: a.ggr + (c.ggr || 0),
+    spend: a.spend + (c.spend || 0),
+    freespin: a.freespin + (c.freespin || 0),
+    hasFreespin: a.hasFreespin || c.freespin != null,
+  }), { ggr: 0, spend: 0, freespin: 0, hasFreespin: false });
+
+  const roasGgr = (c) => (c.spend != null && c.spend > 0 && c.ggr != null ? c.ggr / c.spend : null);
+  const roasCell = (r) => {
+    if (r == null) return <td>—</td>;
+    return <td className={r >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(r)}</td>;
+  };
+  const ggrCell = (v) => (
+    <td className={v != null && v < 0 ? 'ch-roas-neg' : ''}>{fmtBRL(v)}</td>
+  );
+
+  return (
+    <table className="ch-table">
+      <thead>
+        <tr>
+          <th>Canal</th>
+          <th>GGR</th>
+          <th>Investimento</th>
+          <th>ROAS GGR</th>
+          <th>FreeSpins</th>
+        </tr>
+      </thead>
+      <tbody>
+        {channels.map((c, i) => (
+          <tr key={i}>
+            <td className="ch-name">{c.channel}</td>
+            {ggrCell(c.ggr)}
+            <td>{fmtBRL(c.spend)}</td>
+            {roasCell(roasGgr(c))}
+            <td>{fmtBRL(c.freespin)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          {ggrCell(tot.ggr)}
+          <td>{fmtBRL(tot.spend)}</td>
+          {roasCell(tot.spend > 0 ? tot.ggr / tot.spend : null)}
+          <td>{tot.hasFreespin ? fmtBRL(tot.freespin) : '—'}</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+// ============================================================
 // RETENTION TABLE — retenção de valor (R$) por canal
 //   M0→M1 / M1→M2: média das safras com janela completa
 //   M3+: pool de safras antigas, mês ref vs mês anterior
@@ -638,7 +707,7 @@ function TabDepositos({ M, depComposition }) {
   );
 }
 
-function TabGgr({ M }) {
+function TabGgr({ M, ggrChannels }) {
   return (
     <React.Fragment>
       <div className="tab-header">
@@ -652,6 +721,12 @@ function TabGgr({ M }) {
         <Hero metric={M.ggrPerDep} />
         <Hero metric={M.ggrTrend} />
       </div>
+      {ggrChannels && ggrChannels.length > 0 && (
+        <div className="support">
+          <div className="support-title">GGR por Canal</div>
+          <GgrChannelTable channels={ggrChannels} />
+        </div>
+      )}
     </React.Fragment>
   );
 }
@@ -744,6 +819,7 @@ function App() {
     verticals: VERTICALS,
     channels: MOCK_CHANNELS,
     retentionChannels: MOCK_RETENTION_CHANNELS,
+    ggrChannels: MOCK_GGR_CHANNELS,
     isLive: false,
   });
 
@@ -770,6 +846,7 @@ function App() {
           verticals: payload.verticals,
           channels: payload.channels,
           retentionChannels: payload.retentionChannels,
+          ggrChannels: payload.ggrChannels,
           isLive: true,
         }));
       })
@@ -864,6 +941,7 @@ function App() {
           verticals={state.verticals}
           channels={state.channels}
           retentionChannels={state.retentionChannels}
+          ggrChannels={state.ggrChannels}
           isLive={state.isLive}
         />
         <div className="footer">

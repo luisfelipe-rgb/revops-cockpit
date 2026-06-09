@@ -117,6 +117,7 @@ function buildPayload_(fromParam, toParam) {
   const retention = safeQuery_('retention',   () => queryRetention_(w),             { house: { m0m1: null, m1m2: null, m3plus: null }, channels: null }, warnings);
   const verticals = safeQuery_('verticals',   () => queryVerticals_(w),             null, warnings);
   const channels  = safeQuery_('channels',    () => queryChannels_(w),              null, warnings);
+  const ggrChannels = safeQuery_('ggrChannels', () => queryGgrChannels_(w),         null, warnings);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
@@ -129,15 +130,16 @@ function buildPayload_(fromParam, toParam) {
   // ROAS D0 = amount_dep_d0 / spend
   const roasD0Mtd = safeDiv_(pmtd.dep_d0, pmtd.spend);
   const roasD0Lm  = safeDiv_(plm.dep_d0,  plm.spend);
+  // REGRA APOSTOU: o "GGR" do negócio é a coluna ngr_total da player_metrics
   // GGR / Depósito
-  const ggrPerDepMtd = safeDiv_(mtd.ggr, mtd.depositos);
-  const ggrPerDepLm  = safeDiv_(lm.ggr,  lm.depositos);
-  // Hold % = GGR / Turnover (turnover agora vem de tbl_performance_daily)
-  const holdMtd = safeDiv_(mtd.ggr, pmtd.turnover);
-  const holdLm  = safeDiv_(lm.ggr,  plm.turnover);
+  const ggrPerDepMtd = safeDiv_(mtd.ngr, mtd.depositos);
+  const ggrPerDepLm  = safeDiv_(lm.ngr,  lm.depositos);
+  // Hold % = GGR / Turnover (turnover de tbl_performance_daily)
+  const holdMtd = safeDiv_(mtd.ngr, pmtd.turnover);
+  const holdLm  = safeDiv_(lm.ngr,  plm.turnover);
   // Close trend GGR só faz sentido em MTD natural — janela custom mostra null
-  const ggrTrend = w.isNaturalMtd && mtd.ggr != null && w.daysElapsed
-    ? mtd.ggr * (w.daysInMonth / w.daysElapsed)
+  const ggrTrend = w.isNaturalMtd && mtd.ngr != null && w.daysElapsed
+    ? mtd.ngr * (w.daysInMonth / w.daysElapsed)
     : null;
 
   const M = {
@@ -154,7 +156,7 @@ function buildPayload_(fromParam, toParam) {
     depM0Total:  metric_('DEP M0 Total',     null, null, 'brl'),   // TODO: cohort wide _0 sum
     depM0Growth: metric_('DEP M0 Growth',    null, null, 'brl'),   // TODO: cohort wide filtered por platform
     // GGR
-    ggr:        metric_('GGR Total',      mtd.ggr, lm.ggr, 'brl'),
+    ggr:        metric_('GGR Total',      mtd.ngr, lm.ngr, 'brl'),
     ggrPerDep:  metric_('GGR / Depósito', ggrPerDepMtd, ggrPerDepLm, 'pct'),
     ggrTrend:   metric_('Close Trend GGR', ggrTrend, null, 'brl'),
     // TURNOVER
@@ -185,6 +187,7 @@ function buildPayload_(fromParam, toParam) {
     verticals: verticals, // GGR por vertical (casino / esporte / loteria) — de player_metrics
     channels: channels,   // breakdown de aquisição por canal (platform) — tbl_cohort_ftd_base
     retentionChannels: retention.channels, // retenção de valor por canal — cohort wide monthly
+    ggrChannels: ggrChannels, // GGR + ROAS GGR por canal — tbl_performance_daily
   };
 }
 
@@ -372,6 +375,76 @@ function queryChannels_(w) {
     if (aPaid !== bPaid) return aPaid ? -1 : 1;
     if (aPaid) return b.spend - a.spend;
     return (b.ftdAmount || 0) - (a.ftdAmount || 0);
+  });
+}
+
+// Mapeia platform (performance) pros mesmos labels da classificação por utm
+function normalizeChannel_(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (/meta|facebook|\bfb\b|instagram|\big\b/.test(s)) return 'Meta';
+  if (/google|gads|adwords|youtube/.test(s)) return 'Google';
+  if (/tiktok/.test(s)) return 'TikTok';
+  if (/kwai/.test(s)) return 'Kwai';
+  return raw;
+}
+
+function queryGgrChannels_(w) {
+  // REGRA APOSTOU: GGR do negócio = coluna ngr_total da player_metrics.
+  // player_metrics não tem platform — canal vem da atribuição de cadastro
+  // (utm_cadastro_source + afiliado_nome). Spend (pro ROAS GGR) vem da
+  // tbl_performance_daily, casado por canal normalizado.
+  const ggrSql = `
+    SELECT
+      CASE
+        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'meta|facebook|fb_|instagram|ig_') THEN 'Meta'
+        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'google|gads|adwords|youtube')     THEN 'Google'
+        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'tiktok')                          THEN 'TikTok'
+        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'kwai')                            THEN 'Kwai'
+        WHEN afiliado_nome IS NOT NULL AND afiliado_nome != ''                                           THEN 'Afiliados'
+        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm_cadastro_source, '')), r'social|influencer|bio')           THEN 'Social Media'
+        WHEN utm_cadastro_source IS NULL OR utm_cadastro_source = ''                                     THEN 'Orgânico (sem atribuição)'
+        ELSE 'Outros'
+      END AS channel,
+      SUM(ngr_total)           AS ngr,
+      SUM(valor_wins_freespin) AS freespin
+    FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
+    WHERE data_ref BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
+    GROUP BY channel
+  `;
+  const spendSql = `
+    SELECT
+      COALESCE(NULLIF(platform, ''), 'Outros') AS platform,
+      SUM(spend) AS spend
+    FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
+    WHERE report_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
+    GROUP BY platform
+    HAVING SUM(spend) > 0
+  `;
+
+  const ggrRows = runQuery_(ggrSql);
+  if (!ggrRows.length) return null;
+  const spendRows = runQuery_(spendSql);
+
+  const byChannel = {};
+  ggrRows.forEach(r => {
+    byChannel[r.channel] = {
+      channel:  r.channel,
+      ggr:      numOrNull_(r.ngr),
+      spend:    null,
+      freespin: numOrNull_(r.freespin),
+    };
+  });
+  spendRows.forEach(r => {
+    const ch = normalizeChannel_(r.platform);
+    byChannel[ch] = byChannel[ch] || { channel: ch, ggr: null, spend: null, freespin: null };
+    byChannel[ch].spend = (byChannel[ch].spend || 0) + (numOrNull_(r.spend) || 0);
+  });
+
+  return Object.values(byChannel).sort((a, b) => {
+    const aPaid = a.spend != null, bPaid = b.spend != null;
+    if (aPaid !== bPaid) return aPaid ? -1 : 1;
+    if (aPaid) return b.spend - a.spend;
+    return (b.ggr || 0) - (a.ggr || 0);
   });
 }
 
