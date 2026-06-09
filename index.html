@@ -331,6 +331,16 @@ const MOCK_CHANNELS = [
   { channel: 'Orgânico (sem atribuição)', spend: null, ftdQty: 5420, ftdAmount: 318700, depD0: 540900 },
 ];
 
+// Mock — retenção de valor por canal (modo dev). Live vem de payload.retentionChannels.
+const MOCK_RETENTION_CHANNELS = [
+  { channel: 'Meta',          m0Total: 4214000, m0m1: 0.243, m1m2: 0.548, m3plus: 0.612 },
+  { channel: 'Google',        m0Total: 2873000, m0m1: 0.281, m1m2: 0.575, m3plus: 0.655 },
+  { channel: 'Orgânico (sem atribuição)', m0Total: 1517000, m0m1: 0.352, m1m2: 0.681, m3plus: 0.742 },
+  { channel: 'TikTok',        m0Total: 1098000, m0m1: 0.194, m1m2: 0.492, m3plus: 0.518 },
+  { channel: 'Afiliados',     m0Total: 884000,  m0m1: 0.312, m1m2: 0.624, m3plus: 0.701 },
+  { channel: 'Kwai',          m0Total: 421000,  m0m1: 0.171, m1m2: 0.448, m3plus: 0.476 },
+];
+
 const CLUSTER_GGR = [
   { label: 'GGR / DEP M0', value: 0.1510 },
   { label: 'GGR / DEP M1', value: 0.0860 },
@@ -520,6 +530,39 @@ function ChannelTable({ channels }) {
 }
 
 // ============================================================
+// RETENTION TABLE — retenção de valor (R$) por canal
+//   M0→M1 / M1→M2: média das safras com janela completa
+//   M3+: pool de safras antigas, mês ref vs mês anterior
+// ============================================================
+
+function RetentionTable({ channels }) {
+  return (
+    <table className="ch-table">
+      <thead>
+        <tr>
+          <th>Canal</th>
+          <th>Dep. M0 (R$)</th>
+          <th>M0→M1</th>
+          <th>M1→M2</th>
+          <th>M3+</th>
+        </tr>
+      </thead>
+      <tbody>
+        {channels.map((c, i) => (
+          <tr key={i}>
+            <td className="ch-name">{c.channel}</td>
+            <td>{fmtBRL(c.m0Total)}</td>
+            <td>{fmtPct(c.m0m1)}</td>
+            <td>{fmtPct(c.m1m2)}</td>
+            <td>{fmtPct(c.m3plus)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// ============================================================
 // TABS — 3 KPIs hero + viz de apoio
 // ============================================================
 
@@ -547,13 +590,13 @@ function TabAquisicao({ M, channels }) {
   );
 }
 
-function TabRetencao({ M, clusterGgr }) {
+function TabRetencao({ M, retentionChannels }) {
   return (
     <React.Fragment>
       <div className="tab-header">
         <div>
           <h1>Retenções</h1>
-          <div className="subtitle">Permanência das safras anteriores</div>
+          <div className="subtitle">Retenção de valor depositado (R$) — safras anteriores</div>
         </div>
       </div>
       <div className="hero-grid">
@@ -561,10 +604,10 @@ function TabRetencao({ M, clusterGgr }) {
         <Hero metric={M.retM1M2} />
         <Hero metric={M.retM3plus} />
       </div>
-      {clusterGgr && (
+      {retentionChannels && retentionChannels.length > 0 && (
         <div className="support">
-          <div className="support-title">Margem por Safra — GGR / Depósito</div>
-          <HBarList items={clusterGgr} valueFmt="pct" />
+          <div className="support-title">Retenção por Canal</div>
+          <RetentionTable channels={retentionChannels} />
         </div>
       )}
     </React.Fragment>
@@ -700,6 +743,7 @@ function App() {
     depComposition: MOCK_DEP_COMPOSITION,
     verticals: VERTICALS,
     channels: MOCK_CHANNELS,
+    retentionChannels: MOCK_RETENTION_CHANNELS,
     isLive: false,
   });
 
@@ -725,6 +769,7 @@ function App() {
           depComposition: payload.depComposition,
           verticals: payload.verticals,
           channels: payload.channels,
+          retentionChannels: payload.retentionChannels,
           isLive: true,
         }));
       })
@@ -818,6 +863,7 @@ function App() {
           depComposition={state.depComposition}
           verticals={state.verticals}
           channels={state.channels}
+          retentionChannels={state.retentionChannels}
           isLive={state.isLive}
         />
         <div className="footer">

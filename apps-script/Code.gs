@@ -114,7 +114,7 @@ function buildPayload_(fromParam, toParam) {
   const warnings = [];
   const houseAgg  = safeQuery_('house',       () => queryHouseAggregates_(w),       { mtd: {}, lm: {} }, warnings);
   const perfAgg   = safeQuery_('performance', () => queryPerformanceAggregates_(w), { mtd: {}, lm: {} }, warnings);
-  const retention = safeQuery_('retention',   () => queryRetention_(w),             { m0m1: null, m1m2: null, m3plus: null }, warnings);
+  const retention = safeQuery_('retention',   () => queryRetention_(w),             { house: { m0m1: null, m1m2: null, m3plus: null }, channels: null }, warnings);
   const verticals = safeQuery_('verticals',   () => queryVerticals_(w),             null, warnings);
   const channels  = safeQuery_('channels',    () => queryChannels_(w),              null, warnings);
 
@@ -146,9 +146,9 @@ function buildPayload_(fromParam, toParam) {
     roasFtd:    metric_('ROAS FTD',    roasFtdMtd,      roasFtdLm,      'multiple'),
     invest:     metric_('Investimento', pmtd.spend,     plm.spend,      'brl'),
     // RETENÇÃO (from cohort wide view)
-    retM0M1:    metric_('Retenção M0→M1', retention.m0m1, null, 'pct'),
-    retM1M2:    metric_('Retenção M1→M2', retention.m1m2, null, 'pct'),
-    retM3plus:  metric_('Retenção M3+',   retention.m3plus, null, 'pct'),
+    retM0M1:    metric_('Retenção M0→M1', retention.house.m0m1, null, 'pct'),
+    retM1M2:    metric_('Retenção M1→M2', retention.house.m1m2, null, 'pct'),
+    retM3plus:  metric_('Retenção M3+',   retention.house.m3plus, null, 'pct'),
     // DEPÓSITOS
     depTotal:    metric_('Depósitos Totais', mtd.depositos, lm.depositos, 'brl'),
     depM0Total:  metric_('DEP M0 Total',     null, null, 'brl'),   // TODO: cohort wide _0 sum
@@ -183,7 +183,8 @@ function buildPayload_(fromParam, toParam) {
     clusterGgr: null,     // GGR/Dep por safra — pendente
     depComposition: null, // Novos / Recorrentes / Reativados em R$ — pendente
     verticals: verticals, // GGR por vertical (casino / esporte / loteria) — de player_metrics
-    channels: channels,   // breakdown de aquisição por canal (platform) — tbl_performance_daily
+    channels: channels,   // breakdown de aquisição por canal (platform) — tbl_cohort_ftd_base
+    retentionChannels: retention.channels, // retenção de valor por canal — cohort wide monthly
   };
 }
 
@@ -246,36 +247,67 @@ function queryPerformanceAggregates_(w) {
 }
 
 function queryRetention_(w) {
-  // Cohort monthly wide: _0 = deposit value at M0, _1 = M1, etc.
-  // Retenção = SUM(_N) / SUM(_0) — só considera safras com pelo menos N meses de história.
+  // Retenção de VALOR depositado (R$), por canal + casa toda.
+  //
+  // M0→M1 e M1→M2: média das safras (desde 2025-01) com janela completa:
+  //   M0→M1 = SUM(_1)/SUM(_0) onde age>=2 · M1→M2 = SUM(_2)/SUM(_1) onde age>=3
+  //
+  // M3+: snapshot mensal do pool de safras antigas (age>=3 no mês de referência):
+  //   numerador   = depósito do pool NO mês de referência  (_age de cada safra)
+  //   denominador = depósito do MESMO pool no mês anterior (_age-1) —
+  //                 equivale a "M3+ do mês passado + M2 do mês passado"
   const refMonth = w.mtdStart.slice(0, 7) + '-01';
+
+  // CASE dinâmico: pra cada idade 3..23, pega a coluna _N (mês ref) e _N-1 (mês anterior)
+  const ages = [];
+  for (let a = 3; a <= 23; a++) ages.push(a);
+  const caseThis = ages.map(a => `WHEN ${a} THEN _${a}`).join(' ');
+  const casePrev = ages.map(a => `WHEN ${a} THEN _${a - 1}`).join(' ');
+
   const sql = `
-    WITH cohorts AS (
+    WITH base AS (
       SELECT
-        cohort_month,
-        SUM(_0)  AS m0,
-        SUM(_1)  AS m1,
-        SUM(_2)  AS m2,
-        SUM(_3)  AS m3,
-        SUM(_4)  AS m4,
-        SUM(_5)  AS m5
+        COALESCE(NULLIF(platform, ''), 'Orgânico (sem atribuição)') AS channel,
+        DATE_DIFF(DATE '${refMonth}', DATE(cohort_month), MONTH) AS age,
+        *
       FROM \`${PROJECT_ID}.analytics_cohorts.vw_cohort_deposito_amount_wide_monthly\`
       WHERE cohort_month >= "2025-01-01" AND cohort_month <= "${refMonth}"
-      GROUP BY cohort_month
     )
     SELECT
-      SAFE_DIVIDE(SUM(IF(m1 IS NOT NULL, m1, 0)), SUM(IF(m1 IS NOT NULL, m0, 0))) AS m0m1,
-      SAFE_DIVIDE(SUM(IF(m2 IS NOT NULL, m2, 0)), SUM(IF(m2 IS NOT NULL, m1, 0))) AS m1m2,
-      SAFE_DIVIDE(SUM(IF(m3 IS NOT NULL, m3 + IFNULL(m4,0) + IFNULL(m5,0), 0)),
-                  SUM(IF(m3 IS NOT NULL, m2, 0)))                                  AS m3plus
-    FROM cohorts
+      channel,
+      SUM(_0) AS m0_total,
+      SUM(IF(age >= 2, _1, 0)) AS n1,
+      SUM(IF(age >= 2, _0, 0)) AS d1,
+      SUM(IF(age >= 3, _2, 0)) AS n2,
+      SUM(IF(age >= 3, _1, 0)) AS d2,
+      SUM(CASE age ${caseThis} ELSE 0 END) AS n3,
+      SUM(CASE age ${casePrev} ELSE 0 END) AS d3
+    FROM base
+    GROUP BY channel
   `;
   const rows = runQuery_(sql);
-  const r = rows[0] || {};
+  if (!rows.length) return { house: { m0m1: null, m1m2: null, m3plus: null }, channels: null };
+
+  // Rates por canal + acumula numeradores/denominadores pra taxa da casa
+  const acc = { n1: 0, d1: 0, n2: 0, d2: 0, n3: 0, d3: 0 };
+  const channels = rows.map(r => {
+    ['n1','d1','n2','d2','n3','d3'].forEach(k => { acc[k] += numOrNull_(r[k]) || 0; });
+    return {
+      channel: r.channel,
+      m0Total: numOrNull_(r.m0_total),
+      m0m1:   safeDiv_(numOrNull_(r.n1), numOrNull_(r.d1)),
+      m1m2:   safeDiv_(numOrNull_(r.n2), numOrNull_(r.d2)),
+      m3plus: safeDiv_(numOrNull_(r.n3), numOrNull_(r.d3)),
+    };
+  }).sort((a, b) => (b.m0Total || 0) - (a.m0Total || 0));
+
   return {
-    m0m1:   numOrNull_(r.m0m1),
-    m1m2:   numOrNull_(r.m1m2),
-    m3plus: numOrNull_(r.m3plus),
+    house: {
+      m0m1:   safeDiv_(acc.n1, acc.d1),
+      m1m2:   safeDiv_(acc.n2, acc.d2),
+      m3plus: safeDiv_(acc.n3, acc.d3),
+    },
+    channels,
   };
 }
 
