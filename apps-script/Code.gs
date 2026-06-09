@@ -118,6 +118,7 @@ function buildPayload_(fromParam, toParam) {
   const verticals = safeQuery_('verticals',   () => queryVerticals_(w),             null, warnings);
   const channels  = safeQuery_('channels',    () => queryChannels_(w),              null, warnings);
   const ggrChannels = safeQuery_('ggrChannels', () => queryGgrChannels_(w),         null, warnings);
+  const depM0 = safeQuery_('depM0', () => queryDepM0_(w), { total: null, growth: null, m1Total: null, m1Growth: null, channels: null }, warnings);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
@@ -153,8 +154,8 @@ function buildPayload_(fromParam, toParam) {
     retM3plus:  metric_('Retenção M3+',   retention.house.m3plus, null, 'pct'),
     // DEPÓSITOS
     depTotal:    metric_('Depósitos Totais', mtd.depositos, lm.depositos, 'brl'),
-    depM0Total:  metric_('DEP M0 Total',     null, null, 'brl'),   // TODO: cohort wide _0 sum
-    depM0Growth: metric_('DEP M0 Growth',    null, null, 'brl'),   // TODO: cohort wide filtered por platform
+    depM0Total:  metric_('DEP M0 Total',     depM0.total,  depM0.m1Total,  'brl'),
+    depM0Growth: metric_('DEP M0 Growth',    depM0.growth, depM0.m1Growth, 'brl'),
     // GGR
     ggr:        metric_('GGR Total',      mtd.ngr, lm.ngr, 'brl'),
     ggrPerDep:  metric_('GGR / Depósito', ggrPerDepMtd, ggrPerDepLm, 'pct'),
@@ -187,7 +188,8 @@ function buildPayload_(fromParam, toParam) {
     verticals: verticals, // GGR por vertical (casino / esporte / loteria) — de player_metrics
     channels: channels,   // breakdown de aquisição por canal (platform) — tbl_cohort_ftd_base
     retentionChannels: retention.channels, // retenção de valor por canal — cohort wide monthly
-    ggrChannels: ggrChannels, // GGR + ROAS GGR por canal — tbl_performance_daily
+    ggrChannels: ggrChannels, // GGR (ngr_total) + ROAS GGR por canal — player_metrics + performance
+    depM0Channels: depM0.channels, // DEP M0 por canal — vw_cohort_deposito_amount_wide_monthly
   };
 }
 
@@ -446,6 +448,54 @@ function queryGgrChannels_(w) {
     if (aPaid) return b.spend - a.spend;
     return (b.ggr || 0) - (a.ggr || 0);
   });
+}
+
+function queryDepM0_(w) {
+  // DEP M0 por canal — safra do mês de referência (e do mês anterior pro Δ M-1).
+  // "Growth" = canais com investimento (valor_investido > 0) — identificado pelo dado,
+  // sem depender de nome de platform.
+  const refMonth = w.mtdStart.slice(0, 7) + '-01';
+  const lmMonth = w.lmStart.slice(0, 7) + '-01';
+  const sql = `
+    SELECT
+      IF(DATE(cohort_month) = DATE '${refMonth}', 'mtd', 'lm') AS bucket,
+      COALESCE(NULLIF(platform, ''), 'Orgânico (sem atribuição)') AS channel,
+      SUM(amount_deposito_m0) AS dep_m0,
+      SUM(valor_investido)    AS invest
+    FROM \`${PROJECT_ID}.analytics_cohorts.vw_cohort_deposito_amount_wide_monthly\`
+    WHERE DATE(cohort_month) IN (DATE '${refMonth}', DATE '${lmMonth}')
+    GROUP BY bucket, channel
+  `;
+  const rows = runQuery_(sql);
+  if (!rows.length) return { total: null, growth: null, m1Total: null, m1Growth: null, channels: null };
+
+  let total = 0, growth = 0, m1Total = 0, m1Growth = 0;
+  const channels = [];
+  rows.forEach(r => {
+    const dep = numOrNull_(r.dep_m0) || 0;
+    const invest = numOrNull_(r.invest) || 0;
+    const isPaid = invest > 0;
+    if (r.bucket === 'mtd') {
+      total += dep;
+      if (isPaid) growth += dep;
+      channels.push({
+        channel: r.channel,
+        depM0: dep,
+        invest: isPaid ? invest : null,
+      });
+    } else {
+      m1Total += dep;
+      if (isPaid) m1Growth += dep;
+    }
+  });
+
+  channels.sort((a, b) => {
+    const aPaid = a.invest != null, bPaid = b.invest != null;
+    if (aPaid !== bPaid) return aPaid ? -1 : 1;
+    return (b.depM0 || 0) - (a.depM0 || 0);
+  });
+
+  return { total, growth, m1Total, m1Growth, channels: channels.length ? channels : null };
 }
 
 // ============================================================

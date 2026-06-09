@@ -343,6 +343,16 @@ const MOCK_GGR_CHANNELS = [
   { channel: 'Social Media',  ggr: 54300,  spend: null, freespin: 4100 },
 ];
 
+// Mock — DEP M0 por canal (modo dev). Live vem de payload.depM0Channels.
+const MOCK_DEPM0_CHANNELS = [
+  { channel: 'Meta',          depM0: 2814000, invest: 1842300 },
+  { channel: 'Google',        depM0: 1922000, invest: 1120800 },
+  { channel: 'TikTok',        depM0: 684000,  invest: 421500 },
+  { channel: 'Kwai',          depM0: 297000,  invest: 182525 },
+  { channel: 'Orgânico (sem atribuição)', depM0: 1213000, invest: null },
+  { channel: 'Afiliados',     depM0: 688000,  invest: null },
+];
+
 // Mock — retenção de valor por canal (modo dev). Live vem de payload.retentionChannels.
 const MOCK_RETENTION_CHANNELS = [
   { channel: 'Meta',          m0Total: 4214000, m0m1: 0.243, m1m2: 0.548, m3plus: 0.612 },
@@ -599,6 +609,58 @@ function GgrChannelTable({ channels }) {
 }
 
 // ============================================================
+// DEP M0 TABLE — depósito da safra atual por canal
+//   ROAS M0 = DEP M0 ÷ Investimento
+// ============================================================
+
+function DepM0Table({ channels }) {
+  const tot = channels.reduce((a, c) => ({
+    depM0: a.depM0 + (c.depM0 || 0),
+    invest: a.invest + (c.invest || 0),
+  }), { depM0: 0, invest: 0 });
+
+  const roasM0 = (c) => (c.invest != null && c.invest > 0 && c.depM0 != null ? c.depM0 / c.invest : null);
+  const roasCell = (r) => {
+    if (r == null) return <td>—</td>;
+    return <td className={r >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(r)}</td>;
+  };
+
+  return (
+    <table className="ch-table">
+      <thead>
+        <tr>
+          <th>Canal</th>
+          <th>Investimento</th>
+          <th>DEP M0</th>
+          <th>ROAS M0</th>
+          <th>% do Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {channels.map((c, i) => (
+          <tr key={i}>
+            <td className="ch-name">{c.channel}</td>
+            <td>{fmtBRL(c.invest)}</td>
+            <td>{fmtBRL(c.depM0)}</td>
+            {roasCell(roasM0(c))}
+            <td>{tot.depM0 > 0 ? fmtPct((c.depM0 || 0) / tot.depM0) : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          <td>{fmtBRL(tot.invest)}</td>
+          <td>{fmtBRL(tot.depM0)}</td>
+          {roasCell(tot.invest > 0 ? tot.depM0 / tot.invest : null)}
+          <td>100%</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+// ============================================================
 // RETENTION TABLE — retenção de valor (R$) por canal
 //   M0→M1 / M1→M2: média das safras com janela completa
 //   M3+: pool de safras antigas, mês ref vs mês anterior
@@ -683,13 +745,13 @@ function TabRetencao({ M, retentionChannels }) {
   );
 }
 
-function TabDepositos({ M, depComposition }) {
+function TabDepositos({ M, depM0Channels }) {
   return (
     <React.Fragment>
       <div className="tab-header">
         <div>
           <h1>Gestão de Depósitos</h1>
-          <div className="subtitle">Volume depositado e composição da base</div>
+          <div className="subtitle">Volume depositado e safra atual por canal</div>
         </div>
       </div>
       <div className="hero-grid">
@@ -697,10 +759,10 @@ function TabDepositos({ M, depComposition }) {
         <Hero metric={M.depM0Total} />
         <Hero metric={M.depM0Growth} />
       </div>
-      {depComposition && (
+      {depM0Channels && depM0Channels.length > 0 && (
         <div className="support">
-          <div className="support-title">Composição do Depósito MTD</div>
-          <HBarList items={depComposition} valueFmt="brl" />
+          <div className="support-title">DEP M0 por Canal — Safra Atual</div>
+          <DepM0Table channels={depM0Channels} />
         </div>
       )}
     </React.Fragment>
@@ -820,6 +882,7 @@ function App() {
     channels: MOCK_CHANNELS,
     retentionChannels: MOCK_RETENTION_CHANNELS,
     ggrChannels: MOCK_GGR_CHANNELS,
+    depM0Channels: MOCK_DEPM0_CHANNELS,
     isLive: false,
   });
 
@@ -847,6 +910,7 @@ function App() {
           channels: payload.channels,
           retentionChannels: payload.retentionChannels,
           ggrChannels: payload.ggrChannels,
+          depM0Channels: payload.depM0Channels,
           isLive: true,
         }));
       })
@@ -942,6 +1006,7 @@ function App() {
           channels={state.channels}
           retentionChannels={state.retentionChannels}
           ggrChannels={state.ggrChannels}
+          depM0Channels={state.depM0Channels}
           isLive={state.isLive}
         />
         <div className="footer">
