@@ -303,90 +303,41 @@ function queryVerticals_(w) {
   ].sort((a, b) => b.value - a.value);
 }
 
-// Normaliza nomes de canal (platform da performance + utm da player_metrics) num label único
-function normalizeChannel_(raw) {
-  const s = String(raw || '').toLowerCase();
-  if (/meta|facebook|\bfb\b|instagram|\big\b/.test(s)) return 'Meta';
-  if (/google|gads|adwords|youtube/.test(s)) return 'Google';
-  if (/tiktok/.test(s)) return 'TikTok';
-  if (/kwai/.test(s)) return 'Kwai';
-  return null; // não é plataforma paga conhecida
-}
-
 function queryChannels_(w) {
-  // FTDs por atribuição: player_metrics no dia do FTD (utm_cadastro_source + afiliado).
-  // Cobre a casa toda — pago, social, afiliados e sem atribuição (orgânico).
-  const ftdSql = `
-    WITH ftd_dates AS (
-      SELECT account_id, MIN(data_ref) AS ftd_date
-      FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
-      WHERE qtd_ftd > 0
-      GROUP BY account_id
-    ),
-    period AS (
-      SELECT
-        f.account_id,
-        ANY_VALUE(a.utm_cadastro_source) AS utm,
-        ANY_VALUE(a.afiliado_nome)       AS afiliado,
-        SUM(a.ftd_amount)                AS amount
-      FROM ftd_dates f
-      JOIN \`${PROJECT_ID}.dados_clickhouse.player_metrics\` a
-        ON a.account_id = f.account_id AND a.data_ref = f.ftd_date
-      WHERE f.ftd_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
-      GROUP BY f.account_id
-    )
+  // Aquisição por canal — tudo da tbl_cohort_ftd_base (platform cobre pago + orgânico/social).
+  // Grain: periodo × days_since_ftd × platform × utm_campaign_id.
+  // FTD/spend pertencem à linha do dia 0 (dia do FTD) — filtrar evita dupla contagem.
+  const sql = `
     SELECT
-      CASE
-        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm, '')), r'meta|facebook|fb_|instagram|ig_') THEN 'Meta'
-        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm, '')), r'google|gads|adwords|youtube')     THEN 'Google'
-        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm, '')), r'tiktok')                          THEN 'TikTok'
-        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm, '')), r'kwai')                            THEN 'Kwai'
-        WHEN afiliado IS NOT NULL AND afiliado != ''                                     THEN 'Afiliados'
-        WHEN REGEXP_CONTAINS(LOWER(IFNULL(utm, '')), r'social|influencer|bio')           THEN 'Social Media'
-        WHEN utm IS NULL OR utm = ''                                                     THEN 'Orgânico (sem atribuição)'
-        ELSE 'Outros'
-      END AS channel,
-      COUNT(*)    AS ftd_qty,
-      SUM(amount) AS ftd_amount
-    FROM period
+      COALESCE(NULLIF(platform, ''), 'Orgânico (sem atribuição)') AS channel,
+      SUM(spend)      AS spend,
+      SUM(qtd_ftd)    AS ftd_qty,
+      SUM(amount_ftd) AS ftd_amount
+    FROM \`${PROJECT_ID}.analytics_cohorts.tbl_cohort_ftd_base\`
+    WHERE periodo BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
+      AND days_since_ftd = 0
     GROUP BY channel
+    HAVING SUM(qtd_ftd) > 0 OR SUM(spend) > 0
   `;
+  const rows = runQuery_(sql);
+  if (!rows.length) return null;
 
-  // Spend por plataforma paga (só a performance table sabe de investimento)
-  const spendSql = `
-    SELECT
-      COALESCE(NULLIF(platform, ''), 'Outros') AS platform,
-      SUM(spend) AS spend
-    FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
-    WHERE report_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
-    GROUP BY platform
-    HAVING SUM(spend) > 0
-  `;
-
-  const ftdRows = runQuery_(ftdSql);
-  const spendRows = runQuery_(spendSql);
-  if (!ftdRows.length && !spendRows.length) return null;
-
-  // Merge por canal normalizado
-  const byChannel = {};
-  ftdRows.forEach(r => {
-    const ch = r.channel;
-    byChannel[ch] = byChannel[ch] || { channel: ch, spend: null, ftdQty: 0, ftdAmount: 0 };
-    byChannel[ch].ftdQty += numOrNull_(r.ftd_qty) || 0;
-    byChannel[ch].ftdAmount += numOrNull_(r.ftd_amount) || 0;
-  });
-  spendRows.forEach(r => {
-    const ch = normalizeChannel_(r.platform) || r.platform;
-    byChannel[ch] = byChannel[ch] || { channel: ch, spend: null, ftdQty: 0, ftdAmount: 0 };
-    byChannel[ch].spend = (byChannel[ch].spend || 0) + (numOrNull_(r.spend) || 0);
+  const channels = rows.map(r => {
+    const spend = numOrNull_(r.spend);
+    return {
+      channel:   r.channel,
+      spend:     spend > 0 ? spend : null, // 0 = canal sem mídia → front mostra "—"
+      ftdQty:    numOrNull_(r.ftd_qty),
+      ftdAmount: numOrNull_(r.ftd_amount),
+    };
   });
 
-  // Pagos (com spend) primeiro, por spend desc; depois os demais por FTD R$ desc
-  return Object.values(byChannel).sort((a, b) => {
+  // Pagos primeiro (por spend desc), depois os demais (por FTD R$ desc)
+  return channels.sort((a, b) => {
     const aPaid = a.spend != null, bPaid = b.spend != null;
     if (aPaid !== bPaid) return aPaid ? -1 : 1;
     if (aPaid) return b.spend - a.spend;
-    return b.ftdAmount - a.ftdAmount;
+    return (b.ftdAmount || 0) - (a.ftdAmount || 0);
   });
 }
 
