@@ -322,13 +322,13 @@ const CLUSTER_DEP = [
 // Mock — aquisição por canal (modo dev). Live vem de payload.channels.
 // spend: null = canal sem investimento de mídia (social/afiliados/orgânico)
 const MOCK_CHANNELS = [
-  { channel: 'Meta',          spend: 1842300, ftdQty: 14820, ftdAmount: 1058400 },
-  { channel: 'Google',        spend: 1120800, ftdQty: 9640,  ftdAmount: 712300 },
-  { channel: 'TikTok',        spend: 421500,  ftdQty: 4180,  ftdAmount: 268900 },
-  { channel: 'Kwai',          spend: 182525,  ftdQty: 2722,  ftdAmount: 103494 },
-  { channel: 'Afiliados',     spend: null,    ftdQty: 3210,  ftdAmount: 224800 },
-  { channel: 'Social Media',  spend: null,    ftdQty: 1840,  ftdAmount: 96300 },
-  { channel: 'Orgânico (sem atribuição)', spend: null, ftdQty: 5420, ftdAmount: 318700 },
+  { channel: 'Meta',          spend: 1842300, ftdQty: 14820, ftdAmount: 1058400, depD0: 1894200 },
+  { channel: 'Google',        spend: 1120800, ftdQty: 9640,  ftdAmount: 712300,  depD0: 1218400 },
+  { channel: 'TikTok',        spend: 421500,  ftdQty: 4180,  ftdAmount: 268900,  depD0: 423600 },
+  { channel: 'Kwai',          spend: 182525,  ftdQty: 2722,  ftdAmount: 103494,  depD0: 161800 },
+  { channel: 'Afiliados',     spend: null,    ftdQty: 3210,  ftdAmount: 224800,  depD0: 391500 },
+  { channel: 'Social Media',  spend: null,    ftdQty: 1840,  ftdAmount: 96300,   depD0: 152400 },
+  { channel: 'Orgânico (sem atribuição)', spend: null, ftdQty: 5420, ftdAmount: 318700, depD0: 540900 },
 ];
 
 const CLUSTER_GGR = [
@@ -461,7 +461,8 @@ function ChannelTable({ channels }) {
     spend: a.spend + (c.spend || 0),
     ftdQty: a.ftdQty + (c.ftdQty || 0),
     ftdAmount: a.ftdAmount + (c.ftdAmount || 0),
-  }), { spend: 0, ftdQty: 0, ftdAmount: 0 });
+    depD0: a.depD0 + (c.depD0 || 0),
+  }), { spend: 0, ftdQty: 0, ftdAmount: 0, depD0: 0 });
 
   // Canais sem mídia (spend null) não têm ROAS/CAC — mostram "—"
   const roas = (c) => (c.spend != null && c.spend > 0 ? c.ftdAmount / c.spend : null);
@@ -481,6 +482,7 @@ function ChannelTable({ channels }) {
           <th>Investimento</th>
           <th>FTD (R$)</th>
           <th>FTD (qtd)</th>
+          <th>Dep. D0</th>
           <th>ROAS</th>
           <th>CAC</th>
           <th>Ticket Médio</th>
@@ -493,6 +495,7 @@ function ChannelTable({ channels }) {
             <td>{fmtBRL(c.spend)}</td>
             <td>{fmtBRL(c.ftdAmount)}</td>
             <td>{fmtQty(c.ftdQty)}</td>
+            <td>{fmtBRL(c.depD0)}</td>
             {roasCell(roas(c))}
             <td>{fmtBRL(cac(c))}</td>
             <td>{fmtBRL(ticket(c))}</td>
@@ -505,6 +508,7 @@ function ChannelTable({ channels }) {
           <td>{fmtBRL(tot.spend)}</td>
           <td>{fmtBRL(tot.ftdAmount)}</td>
           <td>{fmtQty(tot.ftdQty)}</td>
+          <td>{fmtBRL(tot.depD0)}</td>
           {roasCell(tot.spend > 0 ? tot.ftdAmount / tot.spend : null)}
           <td>{fmtBRL(tot.ftdQty > 0 ? tot.spend / tot.ftdQty : null)}</td>
           <td>{fmtBRL(tot.ftdQty > 0 ? tot.ftdAmount / tot.ftdQty : null)}</td>

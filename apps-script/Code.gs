@@ -310,9 +310,10 @@ function queryChannels_(w) {
   const sql = `
     SELECT
       COALESCE(NULLIF(platform, ''), 'Orgânico (sem atribuição)') AS channel,
-      SUM(spend)      AS spend,
-      SUM(qtd_ftd)    AS ftd_qty,
-      SUM(amount_ftd) AS ftd_amount
+      SUM(spend)           AS spend,
+      SUM(qtd_ftd)         AS ftd_qty,
+      SUM(amount_ftd)      AS ftd_amount,
+      SUM(amount_deposito) AS dep_d0
     FROM \`${PROJECT_ID}.analytics_cohorts.tbl_cohort_ftd_base\`
     WHERE periodo BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
       AND days_since_ftd = 0
@@ -329,6 +330,7 @@ function queryChannels_(w) {
       spend:     spend > 0 ? spend : null, // 0 = canal sem mídia → front mostra "—"
       ftdQty:    numOrNull_(r.ftd_qty),
       ftdAmount: numOrNull_(r.ftd_amount),
+      depD0:     numOrNull_(r.dep_d0),
     };
   });
 
