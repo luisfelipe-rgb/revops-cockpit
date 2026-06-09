@@ -111,15 +111,12 @@ function buildPayload_(fromParam, toParam) {
   const w = windows_(fromParam, toParam);
   const houseAgg = queryHouseAggregates_(w);
   const perfAgg = queryPerformanceAggregates_(w);
-  const ftdBaseAgg = queryFtdBaseAggregates_(w);
   const retention = queryRetention_(w);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
   const pmtd = perfAgg.mtd;
   const plm = perfAgg.lm;
-  const fmtd = ftdBaseAgg.mtd;
-  const flm = ftdBaseAgg.lm;
 
   // ROAS FTD = amount_ftd / spend
   const roasFtdMtd = safeDiv_(pmtd.ftd_amount, pmtd.spend);
@@ -130,9 +127,9 @@ function buildPayload_(fromParam, toParam) {
   // GGR / Depósito
   const ggrPerDepMtd = safeDiv_(mtd.ggr, mtd.depositos);
   const ggrPerDepLm  = safeDiv_(lm.ggr,  lm.depositos);
-  // Hold % = GGR / Turnover
-  const holdMtd = safeDiv_(mtd.ggr, fmtd.turnover);
-  const holdLm  = safeDiv_(lm.ggr,  flm.turnover);
+  // Hold % = GGR / Turnover (turnover agora vem de tbl_performance_daily)
+  const holdMtd = safeDiv_(mtd.ggr, pmtd.turnover);
+  const holdLm  = safeDiv_(lm.ggr,  plm.turnover);
   // Close trend GGR só faz sentido em MTD natural — janela custom mostra null
   const ggrTrend = w.isNaturalMtd && mtd.ggr != null && w.daysElapsed
     ? mtd.ggr * (w.daysInMonth / w.daysElapsed)
@@ -156,7 +153,7 @@ function buildPayload_(fromParam, toParam) {
     ggrPerDep:  metric_('GGR / Depósito', ggrPerDepMtd, ggrPerDepLm, 'pct'),
     ggrTrend:   metric_('Close Trend GGR', ggrTrend, null, 'brl'),
     // TURNOVER
-    turnover:   metric_('Turnover Total',           fmtd.turnover, flm.turnover, 'brl'),
+    turnover:   metric_('Turnover Total',           pmtd.turnover, plm.turnover, 'brl'),
     hold:       metric_('Hold % (GGR / Turnover)',  holdMtd, holdLm, 'pct'),
     bettors:    metric_('Apostadores Ativos',       mtd.depositantes_unicos, lm.depositantes_unicos, 'qty'),
   };
@@ -221,28 +218,14 @@ function queryPerformanceAggregates_(w) {
       SUM(spend)               AS spend,
       SUM(qtd_ftd)             AS ftd_qty,
       SUM(amount_ftd)          AS ftd_amount,
-      SUM(amount_deposito_d0)  AS dep_d0
+      SUM(amount_deposito_d0)  AS dep_d0,
+      SUM(turnover_total)      AS turnover
     FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
     WHERE report_date BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
     GROUP BY bucket
   `;
   const rows = runQuery_(sql);
-  return splitByWindow_(rows, ['spend', 'ftd_qty', 'ftd_amount', 'dep_d0']);
-}
-
-function queryFtdBaseAggregates_(w) {
-  // tbl_cohort_ftd_base tem grain por periodo × days_since_ftd × platform × utm_campaign_id
-  // SUM(turnover_total) WHERE days_since_ftd = 0 == turnover total naquele dia (evita dupla contagem)
-  const sql = `
-    SELECT
-      IF(periodo BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS bucket,
-      SUM(IF(days_since_ftd = 0, turnover_total, 0)) AS turnover
-    FROM \`${PROJECT_ID}.analytics_cohorts.tbl_cohort_ftd_base\`
-    WHERE periodo BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
-    GROUP BY bucket
-  `;
-  const rows = runQuery_(sql);
-  return splitByWindow_(rows, ['turnover']);
+  return splitByWindow_(rows, ['spend', 'ftd_qty', 'ftd_amount', 'dep_d0', 'turnover']);
 }
 
 function queryRetention_(w) {
