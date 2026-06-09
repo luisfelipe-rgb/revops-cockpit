@@ -1,0 +1,18 @@
+{
+  "timeZone": "America/Sao_Paulo",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "BigQuery",
+        "version": "v2",
+        "serviceId": "bigquery"
+      }
+    ]
+  },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "MYSELF"
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}

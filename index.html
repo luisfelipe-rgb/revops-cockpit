@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RevOps Cockpit — Apostou</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #000000;
+    --surface: #0c0c0c;
+    --surface-2: #141414;
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --text: #f5f5f5;
+    --text-muted: #888888;
+    --text-dim: #555555;
+    --positive: #4ade80;
+    --warning: #fbbf24;
+    --negative: #f87171;
+    --accent: #60a5fa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 32px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    flex-wrap: wrap; gap: 12px;
+  }
+  .brand { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .brand span { color: var(--text-muted); font-weight: 400; }
+  .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .meta-chip {
+    font-size: 11px; color: var(--text-muted);
+    background: var(--surface-2); padding: 6px 12px;
+    border-radius: 6px; border: 1px solid var(--border);
+  }
+  .meta-chip strong { color: var(--text); font-weight: 600; }
+  .mock-chip {
+    font-size: 11px; color: var(--warning);
+    background: rgba(251, 191, 36, .08); padding: 6px 12px;
+    border-radius: 6px; border: 1px solid rgba(251, 191, 36, .3);
+  }
+  /* DATE SLICER ROW */
+  .slicer {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 32px; border-bottom: 1px solid var(--border);
+    background: var(--bg); flex-wrap: wrap;
+    position: sticky; top: 65px; z-index: 9;
+  }
+  .slicer-group { display: flex; align-items: center; gap: 8px; }
+  .slicer label {
+    font-size: 11px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
+  }
+  .slicer input[type="date"] {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-family: inherit; font-size: 12px;
+    padding: 6px 10px; border-radius: 6px; outline: none;
+    color-scheme: dark;
+  }
+  .slicer input[type="date"]:focus { border-color: var(--accent); }
+  .slicer-arrow { color: var(--text-dim); font-size: 12px; }
+  .slicer-presets { display: flex; gap: 4px; margin-left: 6px; }
+  .preset-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-muted); padding: 6px 12px; font-size: 11px;
+    border-radius: 6px; cursor: pointer; font-family: inherit;
+    transition: all .15s;
+  }
+  .preset-btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .preset-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .apply-btn {
+    background: var(--accent); border: none; color: var(--bg);
+    padding: 7px 16px; font-size: 12px; font-weight: 600;
+    border-radius: 6px; cursor: pointer; font-family: inherit;
+    margin-left: auto;
+  }
+  .apply-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .apply-btn:hover:not(:disabled) { opacity: .9; }
+  .tabs {
+    display: flex; gap: 2px; padding: 0 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg); overflow-x: auto;
+    position: sticky; top: 126px; z-index: 9;
+  }
+  .tab-btn {
+    background: transparent; border: none; color: var(--text-muted);
+    padding: 14px 18px; font-size: 13px; font-weight: 500;
+    cursor: pointer; border-bottom: 2px solid transparent;
+    font-family: inherit; white-space: nowrap;
+    transition: color .15s, border-color .15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--text); }
+  main {
+    padding: 40px 32px 60px;
+    max-width: 1240px; margin: 0 auto;
+  }
+  .tab-header {
+    margin-bottom: 32px; display: flex;
+    align-items: baseline; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap;
+  }
+  .tab-header h1 {
+    font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
+  }
+  .tab-header .subtitle {
+    color: var(--text-muted); font-size: 13px; margin-top: 6px;
+  }
+  /* HERO KPI GRID — 3 grandes cards */
+  .hero-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 16px; margin-bottom: 36px;
+  }
+  .hero {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 24px 26px;
+    position: relative;
+    transition: border-color .15s, transform .15s;
+  }
+  .hero:hover { border-color: var(--border-strong); }
+  .hero .head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .hero .label {
+    font-size: 11px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .07em;
+    font-weight: 600;
+  }
+  .hero .farol-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: 0 0 12px currentColor;
+  }
+  .hero .farol-dot.verde { background: var(--positive); color: var(--positive); }
+  .hero .farol-dot.amarelo { background: var(--warning); color: var(--warning); }
+  .hero .farol-dot.vermelho { background: var(--negative); color: var(--negative); }
+  .hero .farol-dot.cinza { background: var(--text-dim); color: transparent; box-shadow: none; }
+  .hero .value {
+    font-size: 38px; font-weight: 700; letter-spacing: -0.03em;
+    line-height: 1.05; margin-bottom: 18px;
+  }
+  /* Progress bar vs BP */
+  .vs-bp { margin-top: 4px; }
+  .vs-bp-head {
+    display: flex; justify-content: space-between;
+    margin-bottom: 6px; font-size: 11px; color: var(--text-muted);
+  }
+  .vs-bp-head .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .vs-bp-head .pct.verde { color: var(--positive); }
+  .vs-bp-head .pct.amarelo { color: var(--warning); }
+  .vs-bp-head .pct.vermelho { color: var(--negative); }
+  .vs-bp-track {
+    height: 4px; background: var(--surface-2);
+    border-radius: 2px; overflow: hidden; position: relative;
+  }
+  .vs-bp-fill {
+    height: 100%; border-radius: 2px;
+    transition: width .4s ease;
+  }
+  .vs-bp-fill.verde { background: var(--positive); }
+  .vs-bp-fill.amarelo { background: var(--warning); }
+  .vs-bp-fill.vermelho { background: var(--negative); }
+  .vs-bp-fill.cinza { background: var(--text-dim); }
+  .vs-bp-mark {
+    position: absolute; top: -2px; bottom: -2px;
+    width: 1px; background: var(--text-muted); opacity: .5;
+  }
+  .delta-m1 {
+    margin-top: 12px; font-size: 11px; color: var(--text-muted);
+  }
+  .delta-m1 .up { color: var(--positive); }
+  .delta-m1 .down { color: var(--negative); }
+  /* Supporting section */
+  .support {
+    margin-top: 8px;
+  }
+  .support-title {
+    font-size: 12px; font-weight: 600;
+    color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: .08em; margin-bottom: 14px;
+  }
+  /* Composition bars */
+  .hbar-list { display: flex; flex-direction: column; gap: 12px; }
+  .hbar {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px;
+  }
+  .hbar-head {
+    display: flex; justify-content: space-between;
+    align-items: baseline; margin-bottom: 10px;
+  }
+  .hbar-label { font-size: 13px; color: var(--text); font-weight: 500; }
+  .hbar-value {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .hbar-value .secondary {
+    color: var(--text-muted); margin-left: 8px; font-weight: 400;
+  }
+  .hbar-track {
+    height: 8px; background: var(--surface-2);
+    border-radius: 4px; overflow: hidden;
+  }
+  .hbar-fill {
+    height: 100%; border-radius: 4px;
+    background: var(--accent);
+    transition: width .3s ease;
+  }
+  /* Footer */
+  .footer {
+    margin-top: 48px; padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim); font-size: 11px;
+    text-align: center;
+  }
+  .farol-key {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-right: 14px; font-size: 11px; color: var(--text-muted);
+  }
+  .farol-key .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .farol-key .dot.verde { background: var(--positive); }
+  .farol-key .dot.amarelo { background: var(--warning); }
+  .farol-key .dot.vermelho { background: var(--negative); }
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr; }
+    main { padding: 28px 18px 48px; }
+    .topbar { padding: 12px 18px; }
+    .tabs { padding: 0 18px; }
+    .hero .value { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ============================================================
+// CONFIG — set this to your Apps Script web app URL to go live.
+// Quando `null`, o dashboard mostra o snapshot mock (modo dev).
+// ============================================================
+const ENDPOINT_URL = null;
+
+// ============================================================
+// MOCK DATA — Farol snapshot (22/05/2026) — usado enquanto ENDPOINT_URL = null
+// ============================================================
+const MOCK_META = { refDate: '22/05/2026', m0Days: 31 };
+
+const MOCK_M = {
+  // AQUISIÇÃO
+  ftdAmount:  { act: 2143094.85,  bp: 3937500,    m1: 415250,     pctBp: 0.5444, fmt: 'brl',      label: 'FTD Amount' },
+  roasFtd:    { act: 0.327,       bp: 0.275,      m1: 0.641,      pctBp: 1.188,  fmt: 'multiple', label: 'ROAS FTD' },
+  invest:     { act: 3567125.92,  bp: 10647822.58,m1: 216996.35,  pctBp: 0.3350, fmt: 'brl',      label: 'Investimento' },
+  // RETENÇÃO
+  retM0M1:    { act: 0.2079, bp: 0.75, m1: 0.2388, pctBp: 0.2772, fmt: 'pct', label: 'Retenção M0→M1' },
+  retM1M2:    { act: 0.7436, bp: 0.72, m1: 0.3295, pctBp: 1.0328, fmt: 'pct', label: 'Retenção M1→M2' },
+  retM3plus:  { act: 0.5401, bp: 0.88, m1: 0.7801, pctBp: 0.6138, fmt: 'pct', label: 'Retenção M3+' },
+  // DEPÓSITOS
+  depTotal:    { act: 10935097.81, bp: 20012903.23, m1: 4780033.68, pctBp: 0.5464, fmt: 'brl', label: 'Depósitos Totais' },
+  depM0Total:  { act: 7617534.54,  bp: 20012903.23, m1: 1707288.65, pctBp: 0.3806, fmt: 'brl', label: 'DEP M0 Total' },
+  depM0Growth: { act: 5032012.26,  bp: 16287097.02, m1: 442584.38,  pctBp: 0.3090, fmt: 'brl', label: 'DEP M0 Growth' },
+  // GGR
+  ggr:        { act: 1514272.40, bp: 3577746.74, m1: 683588.78, pctBp: 0.4232, fmt: 'brl', label: 'GGR Total' },
+  ggrPerDep:  { act: 0.1385,     bp: 0.1788,     m1: 0.1430,    pctBp: 0.7746, fmt: 'pct', label: 'GGR / Depósito' },
+  ggrTrend:   { act: 2133747.47, bp: 3577746.74, m1: null,      pctBp: 0.5964, fmt: 'brl', label: 'Close Trend GGR' },
+  // APOSTAS (MOCK)
+  turnover:    { act: 24850000, bp: 32500000, m1: 11200000, pctBp: 0.7646, fmt: 'brl', label: 'Turnover Total' },
+  hold:        { act: 0.0609,   bp: 0.0750,   m1: 0.0610,   pctBp: 0.8120, fmt: 'pct', label: 'Hold % (GGR / Turnover)' },
+  bettors:     { act: 28430,    bp: 35000,    m1: 9820,     pctBp: 0.8123, fmt: 'qty', label: 'Apostadores Ativos' },
+};
+
+const CLUSTER_DEP = [
+  { label: '% DEP Novos', value: 0.7196 },
+  { label: '% DEP Recorrentes', value: 0.2350 },
+  { label: '% DEP Reativados', value: 0.1156 },
+];
+
+const CLUSTER_GGR = [
+  { label: 'GGR / DEP M0', value: 0.1510 },
+  { label: 'GGR / DEP M1', value: 0.0860 },
+  { label: 'GGR / DEP M2', value: 0.0427 },
+  { label: 'GGR / DEP M3+', value: 0.1794 },
+  { label: 'GGR / Reativados', value: 0.0504 },
+];
+
+// Mock composition — só usado em modo dev (ENDPOINT_URL = null)
+const MOCK_DEP_COMPOSITION = [
+  { label: 'Novos (M0)',  value: 0.7196 * MOCK_M.depTotal.act },
+  { label: 'Recorrentes', value: 0.2350 * MOCK_M.depTotal.act },
+  { label: 'Reativados',  value: 0.1156 * MOCK_M.depTotal.act },
+];
+
+const VERTICALS = [
+  { label: 'Sports',      value: 0.382, amount: 24850000 * 0.382 },
+  { label: 'Slots',       value: 0.354, amount: 24850000 * 0.354 },
+  { label: 'Live Casino', value: 0.179, amount: 24850000 * 0.179 },
+  { label: 'Outros',      value: 0.085, amount: 24850000 * 0.085 },
+];
+
+// ============================================================
+// FAROL BANDS — ≥95% verde · 85–94% amarelo · <85% vermelho
+// ============================================================
+const BAND_VERDE = 0.95, BAND_AMARELO = 0.85;
+function farolFromPct(p) {
+  if (p === null || p === undefined || isNaN(p)) return 'cinza';
+  if (p >= BAND_VERDE) return 'verde';
+  if (p >= BAND_AMARELO) return 'amarelo';
+  return 'vermelho';
+}
+
+// ============================================================
+// FORMATTERS
+// ============================================================
+const fmtBRL = (n) => {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  if (abs >= 1e6) return sign + 'R$ ' + (abs / 1e6).toFixed(2).replace('.', ',') + 'M';
+  if (abs >= 1e3) return sign + 'R$ ' + (abs / 1e3).toFixed(1).replace('.', ',') + 'k';
+  return sign + 'R$ ' + abs.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+};
+const fmtPct = (n, d = 1) => (n === null || n === undefined || isNaN(n)) ? '—' : (n * 100).toFixed(d).replace('.', ',') + '%';
+const fmtMultiple = (n) => (n === null || n === undefined || isNaN(n)) ? '—' : n.toFixed(2).replace('.', ',') + 'x';
+const fmtQty = (n) => (n === null || n === undefined || isNaN(n)) ? '—' : Math.round(n).toLocaleString('pt-BR');
+const fmtVal = (n, fmt) => {
+  if (n === null || n === undefined) return '—';
+  if (fmt === 'brl') return fmtBRL(n);
+  if (fmt === 'pct') return fmtPct(n);
+  if (fmt === 'multiple') return fmtMultiple(n);
+  if (fmt === 'qty') return fmtQty(n);
+  return String(n);
+};
+
+// ============================================================
+// HERO CARD
+// ============================================================
+
+function Hero({ metric }) {
+  const farol = farolFromPct(metric.pctBp);
+  const fillPct = metric.pctBp == null ? 0 : Math.min(metric.pctBp * 100, 150); // cap visual em 150%
+  const deltaM1 = (metric.m1 != null && metric.act != null && metric.m1 !== 0)
+    ? (metric.act - metric.m1) / metric.m1 : null;
+  return (
+    <div className="hero">
+      <div className="head">
+        <div className="label">{metric.label}</div>
+        <span className={`farol-dot ${farol}`} title={`${fmtPct(metric.pctBp)} do BP`} />
+      </div>
+      <div className="value">{fmtVal(metric.act, metric.fmt)}</div>
+      {metric.pctBp != null && (
+        <div className="vs-bp">
+          <div className="vs-bp-head">
+            <span>vs Business Plan</span>
+            <span className={`pct ${farol}`}>{fmtPct(metric.pctBp, 0)}</span>
+          </div>
+          <div className="vs-bp-track">
+            {/* mark de 100% — em 150% de escala, 100% = 66.67% */}
+            <div className="vs-bp-mark" style={{ left: `${(100 / 150) * 100}%` }} />
+            <div className={`vs-bp-fill ${farol}`} style={{ width: `${(fillPct / 150) * 100}%` }} />
+          </div>
+        </div>
+      )}
+      {deltaM1 != null && (
+        <div className="delta-m1">
+          <span className={deltaM1 >= 0 ? 'up' : 'down'}>
+            {deltaM1 >= 0 ? '↑' : '↓'} {fmtPct(Math.abs(deltaM1), 0)}
+          </span>
+          {' '}vs mês anterior
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HBarList({ items, valueFmt = 'brl' }) {
+  const max = Math.max(...items.map(i => i.value));
+  return (
+    <div className="hbar-list">
+      {items.map((it, i) => (
+        <div key={i} className="hbar">
+          <div className="hbar-head">
+            <span className="hbar-label">{it.label}</span>
+            <span className="hbar-value">
+              {valueFmt === 'pct' ? fmtPct(it.value, 1) : fmtBRL(it.value)}
+              {it.amount != null && <span className="secondary">{fmtBRL(it.amount)}</span>}
+            </span>
+          </div>
+          <div className="hbar-track">
+            <div className="hbar-fill" style={{ width: `${(it.value / max) * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================
+// TABS — 3 KPIs hero + 1 viz só
+// ============================================================
+
+function TabAquisicao({ M, clusterDep }) {
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Aquisições</h1>
+          <div className="subtitle">FTDs, eficiência e investimento de mídia (canal Growth)</div>
+        </div>
+      </div>
+      <div className="hero-grid">
+        <Hero metric={M.ftdAmount} />
+        <Hero metric={M.roasFtd} />
+        <Hero metric={M.invest} />
+      </div>
+      {clusterDep && (
+        <div className="support">
+          <div className="support-title">Composição da Base — % Depósitos</div>
+          <HBarList items={clusterDep} valueFmt="pct" />
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+function TabRetencao({ M, clusterGgr }) {
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Retenções</h1>
+          <div className="subtitle">Permanência das safras anteriores</div>
+        </div>
+      </div>
+      <div className="hero-grid">
+        <Hero metric={M.retM0M1} />
+        <Hero metric={M.retM1M2} />
+        <Hero metric={M.retM3plus} />
+      </div>
+      {clusterGgr && (
+        <div className="support">
+          <div className="support-title">Margem por Safra — GGR / Depósito</div>
+          <HBarList items={clusterGgr} valueFmt="pct" />
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+function TabDepositos({ M, depComposition }) {
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Gestão de Depósitos</h1>
+          <div className="subtitle">Volume depositado e composição da base</div>
+        </div>
+      </div>
+      <div className="hero-grid">
+        <Hero metric={M.depTotal} />
+        <Hero metric={M.depM0Total} />
+        <Hero metric={M.depM0Growth} />
+      </div>
+      {depComposition && (
+        <div className="support">
+          <div className="support-title">Composição do Depósito MTD</div>
+          <HBarList items={depComposition} valueFmt="brl" />
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+function TabGgr({ M }) {
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Gestão de GGR</h1>
+          <div className="subtitle">Receita bruta, margem e projeção de fechamento</div>
+        </div>
+      </div>
+      <div className="hero-grid">
+        <Hero metric={M.ggr} />
+        <Hero metric={M.ggrPerDep} />
+        <Hero metric={M.ggrTrend} />
+      </div>
+    </React.Fragment>
+  );
+}
+
+function TabApostas({ M, verticals, isLive }) {
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Turnover</h1>
+          <div className="subtitle">Volume apostado, margem da casa e apostadores ativos</div>
+        </div>
+        {!isLive && <span className="mock-chip">Dados mock</span>}
+      </div>
+      <div className="hero-grid">
+        <Hero metric={M.turnover} />
+        <Hero metric={M.hold} />
+        <Hero metric={M.bettors} />
+      </div>
+      {verticals && (
+        <div className="support">
+          <div className="support-title">Turnover por Vertical</div>
+          <HBarList items={verticals} valueFmt="pct" />
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+// ============================================================
+// SHELL
+// ============================================================
+const TABS = [
+  { id: 'aquisicao', label: 'Aquisições', component: TabAquisicao },
+  { id: 'retencao', label: 'Retenções', component: TabRetencao },
+  { id: 'ggr', label: 'GGR', component: TabGgr },
+  { id: 'depositos', label: 'Depósitos', component: TabDepositos },
+  { id: 'apostas', label: 'Turnover', component: TabApostas },
+];
+
+// ============================================================
+// DATE HELPERS — presets + parsing
+// ============================================================
+function todayISO_() {
+  const t = new Date();
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1)
+    .toISOString().slice(0, 10);
+}
+function firstOfMonthISO_(d = new Date()) {
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+}
+function lastMonthRangeISO_() {
+  const t = new Date();
+  const start = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+  const end = new Date(t.getFullYear(), t.getMonth(), 0);
+  return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
+}
+function daysAgoISO_(n) {
+  const t = new Date();
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate() - n)
+    .toISOString().slice(0, 10);
+}
+function fmtBR_(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+const PRESETS = [
+  { id: 'mtd', label: 'MTD', range: () => ({ from: firstOfMonthISO_(), to: todayISO_() }) },
+  { id: '7d',  label: '7d',  range: () => ({ from: daysAgoISO_(7), to: todayISO_() }) },
+  { id: '30d', label: '30d', range: () => ({ from: daysAgoISO_(30), to: todayISO_() }) },
+  { id: 'lm',  label: 'Mês passado', range: () => lastMonthRangeISO_() },
+];
+
+function App() {
+  const [tabId, setTabId] = useState('aquisicao');
+  const initialRange = PRESETS[0].range();
+  const [pendingRange, setPendingRange] = useState(initialRange);
+  const [appliedRange, setAppliedRange] = useState(initialRange);
+  const [activePreset, setActivePreset] = useState('mtd');
+  const [state, setState] = useState({
+    loading: !!ENDPOINT_URL,
+    error: null,
+    meta: MOCK_META,
+    M: MOCK_M,
+    clusterDep: CLUSTER_DEP,
+    clusterGgr: CLUSTER_GGR,
+    depComposition: MOCK_DEP_COMPOSITION,
+    verticals: VERTICALS,
+    isLive: false,
+  });
+
+  useEffect(() => {
+    if (!ENDPOINT_URL) return;
+    setState(prev => ({ ...prev, loading: true, error: null }));
+    const url = `${ENDPOINT_URL}?from=${appliedRange.from}&to=${appliedRange.to}`;
+    fetch(url, { credentials: 'include' })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(payload => {
+        if (payload.error) throw new Error(payload.error);
+        setState(prev => ({
+          ...prev,
+          loading: false,
+          error: null,
+          meta: payload.meta || prev.meta,
+          M: payload.metrics || prev.M,
+          clusterDep: payload.clusterDep,
+          clusterGgr: payload.clusterGgr,
+          depComposition: payload.depComposition,
+          verticals: payload.verticals,
+          isLive: true,
+        }));
+      })
+      .catch(err => {
+        setState(prev => ({ ...prev, loading: false, error: String(err.message || err) }));
+      });
+  }, [appliedRange.from, appliedRange.to]);
+
+  function applyPreset(presetId) {
+    const p = PRESETS.find(x => x.id === presetId);
+    if (!p) return;
+    const r = p.range();
+    setActivePreset(presetId);
+    setPendingRange(r);
+    setAppliedRange(r);
+  }
+
+  function applyManual() {
+    setActivePreset(null);
+    setAppliedRange(pendingRange);
+  }
+
+  const isDirty = pendingRange.from !== appliedRange.from || pendingRange.to !== appliedRange.to;
+
+  const Tab = TABS.find(t => t.id === tabId).component;
+
+  return (
+    <React.Fragment>
+      <header className="topbar">
+        <div className="brand">RevOps Cockpit<span> — Apostou</span></div>
+        <div className="controls">
+          <span className="meta-chip">
+            {fmtBR_(appliedRange.from)} → {fmtBR_(appliedRange.to)}
+          </span>
+          {state.loading && <span className="meta-chip">Carregando do BQ…</span>}
+          {state.error && <span className="mock-chip" title={state.error}>Erro · usando mock</span>}
+          {!state.loading && !state.error && (
+            <span className={state.isLive ? 'meta-chip' : 'mock-chip'}>
+              {state.isLive ? 'Live · BigQuery' : 'Mock · BQ pendente'}
+            </span>
+          )}
+        </div>
+      </header>
+      <div className="slicer">
+        <div className="slicer-group">
+          <label>De</label>
+          <input
+            type="date"
+            value={pendingRange.from}
+            max={pendingRange.to}
+            onChange={e => { setPendingRange(r => ({ ...r, from: e.target.value })); setActivePreset(null); }}
+          />
+          <span className="slicer-arrow">→</span>
+          <label>Até</label>
+          <input
+            type="date"
+            value={pendingRange.to}
+            min={pendingRange.from}
+            onChange={e => { setPendingRange(r => ({ ...r, to: e.target.value })); setActivePreset(null); }}
+          />
+        </div>
+        <div className="slicer-presets">
+          {PRESETS.map(p => (
+            <button
+              key={p.id}
+              className={`preset-btn ${activePreset === p.id ? 'active' : ''}`}
+              onClick={() => applyPreset(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <button className="apply-btn" disabled={!isDirty} onClick={applyManual}>Aplicar</button>
+      </div>
+      <nav className="tabs">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            className={`tab-btn ${tabId === t.id ? 'active' : ''}`}
+            onClick={() => setTabId(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+      <main>
+        <Tab
+          M={state.M}
+          clusterDep={state.clusterDep}
+          clusterGgr={state.clusterGgr}
+          depComposition={state.depComposition}
+          verticals={state.verticals}
+          isLive={state.isLive}
+        />
+        <div className="footer">
+          <span className="farol-key"><span className="dot verde" /> ≥ 95% BP</span>
+          <span className="farol-key"><span className="dot amarelo" /> 85–94%</span>
+          <span className="farol-key"><span className="dot vermelho" /> &lt; 85%</span>
+          <div style={{ marginTop: 8 }}>
+            {state.isLive
+              ? <>Live · gerado em {state.meta.generatedAt ? new Date(state.meta.generatedAt).toLocaleString('pt-BR') : '—'}</>
+              : <>Snapshot {state.meta.refDate} · Mock data · Configure <code>ENDPOINT_URL</code> para ir live</>
+            }
+          </div>
+        </div>
+      </main>
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+</script>
+</body>
+</html>
