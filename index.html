@@ -51,6 +51,18 @@
     background: rgba(251, 191, 36, .08); padding: 6px 12px;
     border-radius: 6px; border: 1px solid rgba(251, 191, 36, .3);
   }
+  .refresh-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--text-muted); font-family: inherit;
+    background: var(--surface-2); padding: 6px 12px;
+    border-radius: 6px; border: 1px solid var(--border);
+    cursor: pointer; transition: all .15s;
+  }
+  .refresh-btn:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+  .refresh-btn:disabled { opacity: .55; cursor: not-allowed; }
+  .refresh-btn svg { width: 13px; height: 13px; }
+  .refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   /* DATE SLICER ROW */
   .slicer {
     display: flex; align-items: center; gap: 14px;
@@ -1029,12 +1041,13 @@ function App() {
     isLive: false,
   });
 
-  useEffect(() => {
+  const loadData = React.useCallback((opts = {}) => {
     if (!ENDPOINT_URL) return;
     setState(prev => ({ ...prev, loading: true, error: null }));
     let url = `${ENDPOINT_URL}?key=${ACCESS_TOKEN}&from=${appliedRange.from}&to=${appliedRange.to}`;
     if (chFilter.channel) url += `&channel=${encodeURIComponent(chFilter.channel)}`;
     else if (chFilter.scope === 'growth') url += `&scope=growth`;
+    if (opts.bustCache) url += `&refresh=true`;
     fetch(url)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1064,6 +1077,8 @@ function App() {
         setState(prev => ({ ...prev, loading: false, error: String(err.message || err) }));
       });
   }, [appliedRange.from, appliedRange.to, chFilter.channel, chFilter.scope]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   // Filtro client-side (modo mock e redundância no live) das tabelas por canal
   function filterByChannel(list, isPaid) {
@@ -1121,6 +1136,20 @@ function App() {
             <span className={state.isLive ? 'meta-chip' : 'mock-chip'}>
               {state.isLive ? 'Live · BigQuery' : 'Mock · BQ pendente'}
             </span>
+          )}
+          {ENDPOINT_URL && (
+            <button
+              className={state.loading ? 'refresh-btn spinning' : 'refresh-btn'}
+              onClick={() => loadData({ bustCache: true })}
+              disabled={state.loading}
+              title="Atualizar dados (fura o cache de 1h do BigQuery)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 4v6h-6M1 20v-6h6"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+              {state.loading ? 'Atualizando…' : 'Atualizar'}
+            </button>
           )}
         </div>
       </header>
