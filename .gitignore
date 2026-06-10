@@ -6,3 +6,8 @@ Thumbs.db
 node_modules/
 .vscode/
 .idea/
+
+# clasp (Apps Script CLI) — não commitar em repo público (scriptId + credenciais)
+.clasp.json
+**/.clasp.json
+.clasprc.json
