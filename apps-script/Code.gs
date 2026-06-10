@@ -7,8 +7,8 @@ const TZ = 'America/Sao_Paulo';
 const CACHE_TTL_SECONDS = 15 * 60;
 const ACCESS_TOKEN = 'rvops_5fa28e9c4b1d3a7f';
 
-// Canais Growth = mídia paga. Labels canônicos da classificação por utm.
-const GROWTH_CHANNELS = ['Meta', 'Google', 'TikTok', 'Kwai'];
+// Canais Growth = mídia paga. Labels canônicos.
+const GROWTH_CHANNELS = ['Meta', 'Google', 'TikTok', 'Kwai', 'Programática'];
 
 // ============================================================
 // ENTRY POINT
@@ -152,14 +152,34 @@ function platformWhere_(filter, col) {
   return `AND LOWER(IFNULL(${col}, '')) = '${esc_(c)}'`;
 }
 
-// Mapeia platform (performance) pros labels canônicos
+// SQL: normaliza a coluna `platform` (cohort/performance usam meta_ads, google_ads,
+// social_media, programatica, kwai_ads...) pros mesmos labels da player_metrics.
+function platformLabelExpr_(col) {
+  return `CASE
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(${col}, '')), r'meta|facebook|instagram') THEN 'Meta'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(${col}, '')), r'google|youtube')          THEN 'Google'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(${col}, '')), r'tiktok')                  THEN 'TikTok'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(${col}, '')), r'kwai')                    THEN 'Kwai'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(${col}, '')), r'program')                 THEN 'Programática'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(${col}, '')), r'social|influencer')       THEN 'Social Media'
+    WHEN REGEXP_CONTAINS(LOWER(IFNULL(${col}, '')), r'afili')                   THEN 'Afiliados'
+    WHEN ${col} IS NULL OR ${col} = ''                                         THEN 'Orgânico (sem atribuição)'
+    ELSE 'Outros'
+  END`;
+}
+
+// JS: mesma normalização pros valores de platform que chegam em JS
 function normalizeChannel_(raw) {
   const s = String(raw || '').toLowerCase();
+  if (!s) return 'Orgânico (sem atribuição)';
   if (/meta|facebook|\bfb\b|instagram|\big\b/.test(s)) return 'Meta';
   if (/google|gads|adwords|youtube/.test(s)) return 'Google';
   if (/tiktok/.test(s)) return 'TikTok';
   if (/kwai/.test(s)) return 'Kwai';
-  return raw;
+  if (/program/.test(s)) return 'Programática';
+  if (/social|influencer/.test(s)) return 'Social Media';
+  if (/afili/.test(s)) return 'Afiliados';
+  return 'Outros';
 }
 
 // ============================================================
@@ -303,8 +323,8 @@ function queryChannels_(w, filter) {
   // FTD/spend pertencem à linha do dia 0 (dia do FTD) — filtrar evita dupla contagem.
   const sql = `
     SELECT
-      COALESCE(NULLIF(platform, ''), 'Orgânico (sem atribuição)') AS channel,
-      SUM(spend)           AS spend,
+      ${platformLabelExpr_('platform')} AS channel,
+      SUM(spend)           AS spend_sum,
       SUM(qtd_ftd)         AS ftd_qty,
       SUM(amount_ftd)      AS ftd_amount,
       SUM(amount_deposito) AS dep_d0
@@ -313,13 +333,12 @@ function queryChannels_(w, filter) {
       AND days_since_ftd = 0
       ${platformWhere_(filter, 'platform')}
     GROUP BY channel
-    HAVING SUM(qtd_ftd) > 0 OR SUM(spend) > 0
   `;
   const rows = runQuery_(sql);
   if (!rows.length) return null;
 
   let channels = rows.map(r => {
-    const spend = numOrNull_(r.spend);
+    const spend = numOrNull_(r.spend_sum);
     return {
       channel:   r.channel,
       spend:     spend > 0 ? spend : null,
@@ -327,7 +346,7 @@ function queryChannels_(w, filter) {
       ftdAmount: numOrNull_(r.ftd_amount),
       depD0:     numOrNull_(r.dep_d0),
     };
-  });
+  }).filter(c => (c.ftdQty || 0) > 0 || c.spend != null);
 
   if (filter.scope === 'growth' && !filter.channel) {
     channels = channels.filter(c => c.spend != null);
@@ -355,7 +374,7 @@ function queryRetention_(w, filter) {
   const sql = `
     WITH base AS (
       SELECT
-        COALESCE(NULLIF(platform, ''), 'Orgânico (sem atribuição)') AS channel,
+        ${platformLabelExpr_('platform')} AS channel,
         DATE_DIFF(DATE '${refMonth}', DATE(cohort_month), MONTH) AS age,
         *
       FROM \`${PROJECT_ID}.analytics_cohorts.vw_cohort_deposito_amount_wide_monthly\`
@@ -425,13 +444,12 @@ function queryGgrChannels_(w, filter) {
   `;
   const spendSql = `
     SELECT
-      COALESCE(NULLIF(platform, ''), 'Outros') AS platform,
-      SUM(spend) AS spend
+      ${platformLabelExpr_('platform')} AS channel,
+      SUM(spend) AS spend_sum
     FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
     WHERE report_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}'
       ${platformWhere_(filter, 'platform')}
-    GROUP BY platform
-    HAVING SUM(spend) > 0
+    GROUP BY channel
   `;
 
   const ggrRows = runQuery_(ggrSql);
@@ -448,9 +466,11 @@ function queryGgrChannels_(w, filter) {
     };
   });
   spendRows.forEach(r => {
-    const ch = normalizeChannel_(r.platform);
+    const spend = numOrNull_(r.spend_sum);
+    if (!(spend > 0)) return;
+    const ch = r.channel;
     byChannel[ch] = byChannel[ch] || { channel: ch, ggr: null, spend: null, freespin: null };
-    byChannel[ch].spend = (byChannel[ch].spend || 0) + (numOrNull_(r.spend) || 0);
+    byChannel[ch].spend = (byChannel[ch].spend || 0) + spend;
   });
 
   let channels = Object.values(byChannel);
@@ -474,7 +494,7 @@ function queryDepM0_(w, filter) {
   const sql = `
     SELECT
       IF(DATE(cohort_month) = DATE '${refMonth}', 'mtd', 'lm') AS bucket,
-      COALESCE(NULLIF(platform, ''), 'Orgânico (sem atribuição)') AS channel,
+      ${platformLabelExpr_('platform')} AS channel,
       SUM(amount_deposito_m0) AS dep_m0,
       SUM(valor_investido)    AS invest
     FROM \`${PROJECT_ID}.analytics_cohorts.vw_cohort_deposito_amount_wide_monthly\`
@@ -546,7 +566,7 @@ function queryRolloverMatrix_(w, filter) {
       total: div(sports + casino + loteria),
       weight: dep, // depósitos — o front usa pra linha Total ponderada
     };
-  });
+  }).filter(r => r.weight != null && r.weight > 0); // sem depósito → rollover indefinido
 
   if (filter.scope === 'growth' && !filter.channel) {
     list = list.filter(r => GROWTH_CHANNELS.indexOf(r.channel) >= 0);
