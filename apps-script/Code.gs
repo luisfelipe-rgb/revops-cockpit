@@ -96,6 +96,12 @@ function parseISO_(s) {
   return new Date(y, m - 1, d);
 }
 
+function shiftISO_(iso, deltaDays) {
+  const d = parseISO_(iso);
+  d.setDate(d.getDate() + deltaDays);
+  return d.toISOString().slice(0, 10);
+}
+
 // ============================================================
 // CHANNEL FILTER HELPERS
 // ============================================================
@@ -195,6 +201,7 @@ function buildPayload_(fromParam, toParam, filter) {
   const retention = safeQuery_('retention',   () => queryRetention_(w, filter),             { house: { m0m1: null, m1m2: null, m3plus: null }, channels: null }, warnings);
   const channels  = safeQuery_('channels',    () => queryChannels_(w, filter),              null, warnings);
   const ggrChannels = safeQuery_('ggrChannels', () => queryGgrChannels_(w, filter),         null, warnings);
+  const ggrPayback = getGgrPayback_(warnings); // safras maduras, independe dos slicers (cache diário)
   const depM0 = safeQuery_('depM0', () => queryDepM0_(w, filter), { total: null, growth: null, m1Total: null, m1Growth: null, channels: null }, warnings);
   const rolloverMatrix = safeQuery_('rolloverMatrix', () => queryRolloverMatrix_(w, filter), null, warnings);
 
@@ -252,6 +259,7 @@ function buildPayload_(fromParam, toParam, filter) {
     channels: channels,                     // aquisição por canal — tbl_cohort_ftd_base
     retentionChannels: retention.channels,  // retenção de valor por canal — cohort wide monthly
     ggrChannels: ggrChannels,               // GGR (ngr) + ROAS GGR + freespin por canal — player_metrics
+    ggrPayback: ggrPayback,                 // payback de GGR por canal (safras maduras 90d) — player_metrics
     depM0Channels: depM0.channels,          // DEP M0 por canal — cohort wide monthly
     rolloverMatrix: rolloverMatrix,         // rollover canal × tipo de jogo — player_metrics
   };
@@ -486,6 +494,127 @@ function queryGgrChannels_(w, filter) {
     if (aPaid) return b.spend - a.spend;
     return (b.ggr || 0) - (a.ggr || 0);
   });
+}
+
+// ------------------------------------------------------------
+// GGR PAYBACK por canal — em quantos dias o GGR (NGR) acumulado da safra
+// cobre o investimento. Base: safras MADURAS (FTD ≥ 90 dias atrás), horizonte 90d.
+// Independe dos slicers → computado 1×/dia e guardado em ScriptProperties (custo baixo).
+// ------------------------------------------------------------
+const PAYBACK_HORIZON_DAYS = 90;
+
+function getGgrPayback_(warnings) {
+  const asOf = windows_(null, null).mtdEnd; // ontem, mesma convenção do dashboard
+  const props = PropertiesService.getScriptProperties();
+  try {
+    const raw = props.getProperty('ggrPayback');
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && obj.asOf === asOf && obj.data) return obj.data; // já computado hoje
+    }
+  } catch (e) { /* cache corrompido → recomputa */ }
+
+  const data = safeQuery_('ggrPayback', () => queryGgrPayback_(asOf), null, warnings);
+  if (data) {
+    try { props.setProperty('ggrPayback', JSON.stringify({ asOf: asOf, data: data })); } catch (e) {}
+  }
+  return data;
+}
+
+function queryGgrPayback_(asOf) {
+  const H = PAYBACK_HORIZON_DAYS;
+  const cohortEnd   = shiftISO_(asOf, -H);         // FTD ≤ asOf-90 → ≥90d de maturidade
+  const cohortStart = shiftISO_(asOf, -(H + 90));  // safras de uma janela de 90 dias (asOf-180..asOf-90)
+
+  // NGR por canal × idade da safra (0..H). Atribuição = utm de cadastro (mesma da aba GGR).
+  const ngrSql = `
+    WITH ftd AS (
+      SELECT
+        account_id,
+        MIN(data_ref)                  AS ftd_date,
+        ANY_VALUE(utm_cadastro_source) AS utm_cadastro_source,
+        ANY_VALUE(utm_cadastro_medium) AS utm_cadastro_medium,
+        ANY_VALUE(afiliado_nome)       AS afiliado_nome
+      FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
+      WHERE qtd_ftd > 0
+        AND data_ref BETWEEN DATE '${cohortStart}' AND DATE '${cohortEnd}'
+      GROUP BY account_id
+    ),
+    labeled AS (
+      SELECT account_id, ftd_date, ${caseChannelExpr_()} AS channel
+      FROM ftd
+    ),
+    activity AS (
+      SELECT
+        l.channel,
+        DATE_DIFF(pm.data_ref, l.ftd_date, DAY) AS age,
+        SUM(pm.ngr_total)                       AS ngr
+      FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\` pm
+      JOIN labeled l USING (account_id)
+      WHERE pm.data_ref BETWEEN DATE '${cohortStart}' AND DATE '${asOf}'
+        AND DATE_DIFF(pm.data_ref, l.ftd_date, DAY) BETWEEN 0 AND ${H}
+      GROUP BY channel, age
+    )
+    SELECT channel, age, ngr FROM activity ORDER BY channel, age
+  `;
+
+  // Investimento da safra = mídia paga gasta na janela de aquisição (mesma janela do FTD).
+  const spendSql = `
+    SELECT ${platformLabelExpr_('platform')} AS channel, SUM(spend) AS spend_sum
+    FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
+    WHERE report_date BETWEEN DATE '${cohortStart}' AND DATE '${cohortEnd}'
+    GROUP BY channel
+  `;
+
+  const ngrRows = runQuery_(ngrSql);
+  const spendRows = runQuery_(spendSql);
+
+  const spendByCh = {};
+  spendRows.forEach(r => {
+    const s = numOrNull_(r.spend_sum);
+    if (s > 0) spendByCh[r.channel] = (spendByCh[r.channel] || 0) + s;
+  });
+
+  const ageByCh = {};
+  ngrRows.forEach(r => {
+    const age = numOrNull_(r.age);
+    if (age == null) return;
+    const ch = r.channel;
+    (ageByCh[ch] = ageByCh[ch] || {})[age] = (ageByCh[ch][age] || 0) + (numOrNull_(r.ngr) || 0);
+  });
+
+  // payback = 1º dia em que GGR acumulado ≥ investimento. Só canais com investimento.
+  function paybackOf(spend, ages) {
+    let cum = 0, payback = null;
+    for (let a = 0; a <= H; a++) {
+      cum += ages[a] || 0;
+      if (payback === null && cum >= spend) payback = a;
+    }
+    return { paybackDays: payback, reached: payback !== null, spend: spend, ggrH: cum, roasH: spend > 0 ? cum / spend : null };
+  }
+
+  const byChannel = {};
+  Object.keys(spendByCh).forEach(ch => {
+    byChannel[ch] = paybackOf(spendByCh[ch], ageByCh[ch] || {});
+  });
+
+  // "Casa" = todos os canais pagos combinados (curva agregada vs investimento total)
+  const totalAge = {};
+  let totalSpend = 0;
+  Object.keys(spendByCh).forEach(ch => {
+    totalSpend += spendByCh[ch];
+    const ages = ageByCh[ch] || {};
+    Object.keys(ages).forEach(a => { totalAge[a] = (totalAge[a] || 0) + ages[a]; });
+  });
+
+  return {
+    horizonDays: H,
+    cohortFrom: cohortStart,
+    cohortTo: cohortEnd,
+    asOf: asOf,
+    byChannel: byChannel,
+    total: totalSpend > 0 ? paybackOf(totalSpend, totalAge) : null,
+  };
 }
 
 function queryDepM0_(w, filter) {
