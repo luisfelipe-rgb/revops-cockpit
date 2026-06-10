@@ -928,24 +928,31 @@ const TABS = [
 // ============================================================
 // DATE HELPERS — presets + parsing
 // ============================================================
+// YYYY-MM-DD a partir dos componentes LOCAIS (sem passar por UTC, que jogaria
+// a data 1 dia pra trás em fusos UTC+). Sempre reflete o calendário de quem abre.
+function toLocalISO_(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 function todayISO_() {
+  // "Até" = ontem: último dia com dado completo no BQ (recarrega ~1x/dia).
   const t = new Date();
-  return new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1)
-    .toISOString().slice(0, 10);
+  return toLocalISO_(new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1));
 }
 function firstOfMonthISO_(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return toLocalISO_(new Date(d.getFullYear(), d.getMonth(), 1));
 }
 function lastMonthRangeISO_() {
   const t = new Date();
   const start = new Date(t.getFullYear(), t.getMonth() - 1, 1);
   const end = new Date(t.getFullYear(), t.getMonth(), 0);
-  return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
+  return { from: toLocalISO_(start), to: toLocalISO_(end) };
 }
 function daysAgoISO_(n) {
   const t = new Date();
-  return new Date(t.getFullYear(), t.getMonth(), t.getDate() - n)
-    .toISOString().slice(0, 10);
+  return toLocalISO_(new Date(t.getFullYear(), t.getMonth(), t.getDate() - n));
 }
 function fmtBR_(iso) {
   if (!iso) return '—';
@@ -1010,7 +1017,10 @@ function deriveMockM_(M, filter) {
 }
 
 const PRESETS = [
-  { id: 'mtd', label: 'MTD', range: () => ({ from: firstOfMonthISO_(), to: todayISO_() }) },
+  { id: 'mtd', label: 'MTD', range: () => {
+      const from = firstOfMonthISO_(), to = todayISO_();
+      return { from, to: to < from ? from : to };  // no dia 1º, não deixa "até" cair no mês anterior
+    } },
   { id: '7d',  label: '7d',  range: () => ({ from: daysAgoISO_(7), to: todayISO_() }) },
   { id: '30d', label: '30d', range: () => ({ from: daysAgoISO_(30), to: todayISO_() }) },
   { id: 'lm',  label: 'Mês passado', range: () => lastMonthRangeISO_() },
@@ -1079,6 +1089,31 @@ function App() {
   }, [appliedRange.from, appliedRange.to, chFilter.channel, chFilter.scope]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Auto-roll do calendário: se um preset estiver ativo (MTD/7d/30d/mês passado),
+  // re-avalia a data quando a aba volta ao foco e periodicamente — assim o MTD
+  // acompanha o dia mesmo numa aba/telão deixado aberto virando a meia-noite.
+  // Só atualiza (e re-busca) se a janela realmente mudou.
+  useEffect(() => {
+    if (!activePreset) return;
+    function reevaluate() {
+      const p = PRESETS.find(x => x.id === activePreset);
+      if (!p) return;
+      const r = p.range();
+      const same = prev => prev.from === r.from && prev.to === r.to;
+      setAppliedRange(prev => same(prev) ? prev : r);
+      setPendingRange(prev => same(prev) ? prev : r);
+    }
+    function onVisible() { if (document.visibilityState === 'visible') reevaluate(); }
+    window.addEventListener('focus', reevaluate);
+    document.addEventListener('visibilitychange', onVisible);
+    const tick = setInterval(reevaluate, 5 * 60 * 1000);
+    return () => {
+      window.removeEventListener('focus', reevaluate);
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(tick);
+    };
+  }, [activePreset]);
 
   // Filtro client-side (modo mock e redundância no live) das tabelas por canal
   function filterByChannel(list, isPaid) {
