@@ -632,6 +632,7 @@ function queryDailyCohort_(w, filter) {
       MAX(days_since_ftd)                                          AS max_age,
       SUM(IF(days_since_ftd = 0, qtd_ftd, 0))                      AS ftd_qty,
       SUM(IF(days_since_ftd = 0, amount_ftd, 0))                   AS ftd_amt,
+      SUM(IF(days_since_ftd = 0, qtd_registro, 0))                 AS registros,
       SUM(IF(days_since_ftd = 0, amount_deposito, 0))              AS d0,
       SUM(IF(days_since_ftd = 1, amount_deposito, 0))              AS d1,
       SUM(IF(days_since_ftd BETWEEN 1 AND 7, amount_deposito, 0))  AS w1
@@ -641,11 +642,11 @@ function queryDailyCohort_(w, filter) {
     GROUP BY d
     ORDER BY d
   `;
-  // Cadastros do dia + FTDs que cadastraram e depositaram no mesmo dia (same-day).
-  const regSql = `
+  // FTDs que cadastraram e depositaram no mesmo dia (numerador da Tx Passagem same-day).
+  // O denominador (cadastros) vem da cohort base p/ bater com o print.
+  const samedaySql = `
     SELECT
       data_ref AS d,
-      SUM(qtd_registro) AS registros,
       SUM(IF(qtd_ftd > 0 AND DATE(data_cadastro) = data_ref, qtd_ftd, 0)) AS sameday_ftd
     FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
     WHERE data_ref BETWEEN DATE '${from}' AND DATE '${to}'
@@ -680,11 +681,11 @@ function queryDailyCohort_(w, filter) {
 
   const cohortRows = runQuery_(cohortSql);
   if (!cohortRows.length) return null;
-  const regRows = runQuery_(regSql);
+  const samedayRows = runQuery_(samedaySql);
   const cntRows = runQuery_(cntSql);
 
-  const regByDate = {}, cntByDate = {};
-  regRows.forEach(r => { regByDate[r.d] = { reg: numOrNull_(r.registros) || 0, sameday: numOrNull_(r.sameday_ftd) || 0 }; });
+  const samedayByDate = {}, cntByDate = {};
+  samedayRows.forEach(r => { samedayByDate[r.d] = numOrNull_(r.sameday_ftd) || 0; });
   cntRows.forEach(r => { cntByDate[r.d] = { d0: numOrNull_(r.d0_cnt) || 0, d1: numOrNull_(r.d1_cnt) || 0 }; });
 
   let tFtdQty = 0, tFtdAmt = 0, tD0 = 0, tD1 = 0, tW1 = 0, tReg = 0, tSameday = 0, tD0cnt = 0, tD1cnt = 0;
@@ -696,17 +697,18 @@ function queryDailyCohort_(w, filter) {
     const matured = maxAge != null && maxAge >= 1; // safra já tem ao menos o dia 1
     const d1 = matured ? (numOrNull_(r.d1) || 0) : null;
     const w1 = matured ? (numOrNull_(r.w1) || 0) : null;
-    const rg = regByDate[r.d] || { reg: 0, sameday: 0 };
+    const reg = numOrNull_(r.registros) || 0;   // cadastros da cohort base (platform) — bate com o print
+    const sameday = samedayByDate[r.d] || 0;     // same-day FTDs da player_metrics
     const ct = cntByDate[r.d] || { d0: 0, d1: 0 };
 
-    tFtdQty += ftdQty; tFtdAmt += ftdAmt; tD0 += d0; tReg += rg.reg; tSameday += rg.sameday; tD0cnt += ct.d0;
+    tFtdQty += ftdQty; tFtdAmt += ftdAmt; tD0 += d0; tReg += reg; tSameday += sameday; tD0cnt += ct.d0;
     if (d1 != null) { tD1 += d1; tD1cnt += ct.d1; }
     if (w1 != null) tW1 += w1;
 
     return {
       date:    r.d,
-      txPass:  rg.reg > 0 ? ftdQty / rg.reg : null,
-      txPassSD: rg.reg > 0 ? rg.sameday / rg.reg : null,
+      txPass:  reg > 0 ? ftdQty / reg : null,
+      txPassSD: reg > 0 ? sameday / reg : null,
       ftdQty:  ftdQty,
       ftdAmt:  ftdAmt,
       d0:      d0,
