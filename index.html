@@ -397,6 +397,27 @@ const MOCK_GGR_PAYBACK = {
   total: { paybackDays: 38, reached: true, spend: 3567125, ggrH: 3861700, roasH: 1.08 },
 };
 
+// Mock — safra diária por canal (modo dev). Live vem de payload.dailyCohort.
+// Cada linha = safra de FTD do dia. D0/D1/W1 = depósito por idade da safra; Ret = D1|W1 ÷ D0.
+const MOCK_DAILY_COHORT = {
+  // números ilustrativos (do print do Luis + tickets/same-day fictícios) — rótulo segue o slicer.
+  // ftdQty/ftdAmt ficam no dado p/ calcular o Tkt Médio FTD, mas não viram coluna.
+  channelLabel: null,
+  totals: { txPass: 0.75, txPassSD: 0.60, ftdQty: 941, ftdAmt: 73017, d0: 148575, tktD0: 158, d1: 37266, tktD1: 245, retD1: 0.251, w1: 111397, retW1: 0.75 },
+  rows: [
+    { date: '2026-06-01', txPass: 0.732, txPassSD: 0.61, ftdQty: 90,  ftdAmt: 9147.2,  d0: 19501.3, tktD0: 167, d1: 3438.5, tktD1: 245, retD1: 0.176, w1: 16304.5, retW1: 0.836 },
+    { date: '2026-06-02', txPass: 0.732, txPassSD: 0.60, ftdQty: 90,  ftdAmt: 7685.9,  d0: 21458.6, tktD0: 158, d1: 5925.8, tktD1: 310, retD1: 0.276, w1: 34375.0, retW1: 1.602 },
+    { date: '2026-06-03', txPass: 1.011, txPassSD: 0.68, ftdQty: 95,  ftdAmt: 7405.1,  d0: 14073.7, tktD0: 142, d1: 3498.1, tktD1: 198, retD1: 0.249, w1: 8876.1,  retW1: 0.631 },
+    { date: '2026-06-04', txPass: 0.819, txPassSD: 0.66, ftdQty: 122, ftdAmt: 9534.7,  d0: 24507.3, tktD0: 175, d1: 9751.3, tktD1: 280, retD1: 0.398, w1: 14082.8, retW1: 0.575 },
+    { date: '2026-06-05', txPass: 0.872, txPassSD: 0.71, ftdQty: 102, ftdAmt: 7832.8,  d0: 14294.4, tktD0: 151, d1: 4066.0, tktD1: 226, retD1: 0.284, w1: 12783.7, retW1: 0.894 },
+    { date: '2026-06-06', txPass: 1.000, txPassSD: 0.74, ftdQty: 89,  ftdAmt: 7086.3,  d0: 12470.3, tktD0: 138, d1: 1610.0, tktD1: 179, retD1: 0.129, w1: 8684.0,  retW1: 0.696 },
+    { date: '2026-06-07', txPass: 0.779, txPassSD: 0.58, ftdQty: 74,  ftdAmt: 10547.0, d0: 15217.0, tktD0: 192, d1: 1572.0, tktD1: 215, retD1: 0.103, w1: 3397.0,  retW1: 0.223 },
+    { date: '2026-06-08', txPass: 0.741, txPassSD: 0.55, ftdQty: 117, ftdAmt: 7407.0,  d0: 15847.0, tktD0: 149, d1: 6324.0, tktD1: 264, retD1: 0.399, w1: 11814.0, retW1: 0.746 },
+    { date: '2026-06-09', txPass: 0.559, txPassSD: 0.42, ftdQty: 105, ftdAmt: 4140.0,  d0: 8120.5,  tktD0: 121, d1: 1080.0, tktD1: 180, retD1: 0.133, w1: 1080.0,  retW1: 0.133 },
+    { date: '2026-06-10', txPass: 0.460, txPassSD: 0.35, ftdQty: 57,  ftdAmt: 2231.0,  d0: 3085.0,  tktD0: 108, d1: null,   tktD1: null, retD1: null,  w1: null,    retW1: null },
+  ],
+};
+
 // Mock — DEP M0 por canal (modo dev). Live vem de payload.depM0Channels.
 const MOCK_DEPM0_CHANNELS = [
   { channel: 'Meta',          depM0: 2814000, invest: 1842300 },
@@ -954,8 +975,133 @@ function TabApostas({ M, rolloverMatrix, isLive }) {
 // ============================================================
 // SHELL
 // ============================================================
+// ============================================================
+// SAFRAS DIÁRIAS — tabela de safra de FTD por dia (passagem, D0/D1/W1, retenção)
+// ============================================================
+
+// Fundo heatmap de 3 cores (vermelho→amarelo→verde) escalado pelo min/max da coluna —
+// igual à formatação condicional do Excel do Luis: piores dias em vermelho, melhores em verde.
+function heatBg_(v, min, max) {
+  if (v == null || isNaN(v)) return undefined;
+  const t = max > min ? Math.max(0, Math.min(1, (v - min) / (max - min))) : 0.5;
+  let r, g, b;
+  if (t < 0.5) {                 // vermelho → amarelo
+    const k = t / 0.5;
+    r = Math.round(224 + (250 - 224) * k);
+    g = Math.round(72  + (205 - 72)  * k);
+    b = Math.round(72  + (80  - 72)  * k);
+  } else {                       // amarelo → verde
+    const k = (t - 0.5) / 0.5;
+    r = Math.round(250 + (60  - 250) * k);
+    g = Math.round(205 + (170 - 205) * k);
+    b = Math.round(80  + (95  - 80)  * k);
+  }
+  return `rgba(${r}, ${g}, ${b}, 0.26)`;
+}
+
+function DailyCohortTable({ data }) {
+  const rows = data.rows || [];
+  const t = data.totals || {};
+  const range = (key) => {
+    const vals = rows.map(r => r[key]).filter(v => v != null && !isNaN(v));
+    return vals.length ? { min: Math.min(...vals), max: Math.max(...vals) } : { min: 0, max: 1 };
+  };
+  const rD1 = range('retD1'), rW1 = range('retW1');
+  const dm = (iso) => { if (!iso) return '—'; const p = iso.split('-'); return `${p[2]}/${p[1]}`; };
+  const tktFtd = (o) => (o.ftdQty > 0 ? o.ftdAmt / o.ftdQty : null);
+
+  return (
+    <table className="ch-table">
+      <thead>
+        <tr>
+          <th>Data FTD</th>
+          <th>Tx Passagem</th>
+          <th>Tx Pass. mesmo dia</th>
+          <th>Tkt Médio FTD</th>
+          <th>D0 $</th>
+          <th>Tkt Médio D0</th>
+          <th>D1 $</th>
+          <th>Tkt Médio D1</th>
+          <th>Ret. D1</th>
+          <th>W1 $</th>
+          <th>Ret. W1</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i}>
+            <td className="ch-name">{dm(r.date)}</td>
+            <td>{fmtPct(r.txPass, 1)}</td>
+            <td>{fmtPct(r.txPassSD, 1)}</td>
+            <td>{fmtBRL(tktFtd(r))}</td>
+            <td>{fmtBRL(r.d0)}</td>
+            <td>{fmtBRL(r.tktD0)}</td>
+            <td>{fmtBRL(r.d1)}</td>
+            <td>{fmtBRL(r.tktD1)}</td>
+            <td style={{ background: heatBg_(r.retD1, rD1.min, rD1.max) }}>{fmtPct(r.retD1, 1)}</td>
+            <td>{fmtBRL(r.w1)}</td>
+            <td style={{ background: heatBg_(r.retW1, rW1.min, rW1.max) }}>{fmtPct(r.retW1, 1)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          <td>{fmtPct(t.txPass, 1)}</td>
+          <td>{fmtPct(t.txPassSD, 1)}</td>
+          <td>{fmtBRL(tktFtd(t))}</td>
+          <td>{fmtBRL(t.d0)}</td>
+          <td>{fmtBRL(t.tktD0)}</td>
+          <td>{fmtBRL(t.d1)}</td>
+          <td>{fmtBRL(t.tktD1)}</td>
+          <td>{fmtPct(t.retD1, 1)}</td>
+          <td>{fmtBRL(t.w1)}</td>
+          <td>{fmtPct(t.retW1, 1)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+function TabSafras({ dailyCohort, chFilter }) {
+  if (!dailyCohort) return null;
+  const t = dailyCohort.totals || {};
+  const heroes = [
+    { label: 'Tx Passagem', act: t.txPass, m1: null, pctBp: null, fmt: 'pct' },
+    { label: 'Retenção D1', act: t.retD1,  m1: null, pctBp: null, fmt: 'pct' },
+    { label: 'Retenção W1', act: t.retW1,  m1: null, pctBp: null, fmt: 'pct' },
+  ];
+  // Rótulo segue o slicer (igual às outras abas): sem filtro = Total Casa (blended).
+  const chLabel = (chFilter && chFilter.channel)
+    ? chFilter.channel
+    : (chFilter && chFilter.scope === 'growth' ? 'Canais Growth' : 'Total Casa');
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Safras Diárias</h1>
+          <div className="subtitle">Qualidade da safra de FTD por dia — passagem, depósito e retenção D0/D1/W1</div>
+        </div>
+      </div>
+      <div className="hero-grid">
+        {heroes.map((m, i) => <Hero key={i} metric={m} />)}
+      </div>
+      <div className="support">
+        <div className="support-title">Safra por Dia · {chLabel}</div>
+        <DailyCohortTable data={dailyCohort} />
+        <div className="ch-note">
+          Cada linha = safra de FTD daquele dia. <strong>D0</strong> = depósito no dia do FTD · <strong>D1</strong> = dia seguinte · <strong>W1</strong> = acumulado dos dias 1–7.
+          <strong> Ret. D1 / W1</strong> = D1 | W1 ÷ D0. <strong>Tx Passagem</strong> = FTD ÷ registros do dia.
+          Safras recentes ainda sem dado de D1/W1 aparecem como —.
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
+
 const TABS = [
   { id: 'aquisicao', label: 'Aquisições', component: TabAquisicao },
+  { id: 'safras', label: 'Safras Diárias', component: TabSafras },
   { id: 'retencao', label: 'Retenções', component: TabRetencao },
   { id: 'ggr', label: 'GGR', component: TabGgr },
   { id: 'depositos', label: 'Depósitos', component: TabDepositos },
@@ -1058,6 +1204,7 @@ const PRESETS = [
       const from = firstOfMonthISO_(), to = todayISO_();
       return { from, to: to < from ? from : to };  // no dia 1º, não deixa "até" cair no mês anterior
     } },
+  { id: 'dia', label: 'Diário', range: () => ({ from: todayISO_(), to: todayISO_() }) }, // um único dia (ontem = último dia completo)
   { id: '7d',  label: '7d',  range: () => ({ from: daysAgoISO_(7), to: todayISO_() }) },
   { id: '30d', label: '30d', range: () => ({ from: daysAgoISO_(30), to: todayISO_() }) },
   { id: 'lm',  label: 'Mês passado', range: () => lastMonthRangeISO_() },
@@ -1084,6 +1231,7 @@ function App() {
     retentionChannels: MOCK_RETENTION_CHANNELS,
     ggrChannels: MOCK_GGR_CHANNELS,
     ggrPayback: MOCK_GGR_PAYBACK,
+    dailyCohort: MOCK_DAILY_COHORT,
     depM0Channels: MOCK_DEPM0_CHANNELS,
     rolloverMatrix: MOCK_ROLLOVER_MATRIX,
     isLive: false,
@@ -1117,6 +1265,7 @@ function App() {
           retentionChannels: payload.retentionChannels,
           ggrChannels: payload.ggrChannels,
           ggrPayback: payload.ggrPayback || prev.ggrPayback,
+          dailyCohort: payload.dailyCohort || prev.dailyCohort,
           depM0Channels: payload.depM0Channels,
           rolloverMatrix: payload.rolloverMatrix,
           isLive: true,
@@ -1303,6 +1452,8 @@ function App() {
           retentionChannels={fRetentionChannels}
           ggrChannels={fGgrChannels}
           ggrPayback={state.ggrPayback}
+          dailyCohort={state.dailyCohort}
+          chFilter={chFilter}
           depM0Channels={fDepM0Channels}
           rolloverMatrix={fRolloverMatrix}
           isLive={state.isLive}
