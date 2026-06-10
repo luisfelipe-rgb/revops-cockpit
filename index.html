@@ -1199,6 +1199,60 @@ function deriveMockM_(M, filter) {
   };
 }
 
+// Live: deriva os hero cards do canal/scope a partir dos componentes por canal (exato, mesma fonte do backend).
+function deriveLiveM_(M, filter, comp, retCh, depCh) {
+  if ((!filter.channel && filter.scope !== 'growth') || !comp) return M;
+  const inSel = (ch) => filter.channel ? ch === filter.channel : GROWTH_CHANNELS.indexOf(ch) >= 0;
+  const sel = Object.keys(comp).filter(inSel);
+  const sum = (bk, key) => sel.reduce((a, ch) => {
+    const c = comp[ch] && comp[ch][bk]; return a + ((c && c[key]) || 0);
+  }, 0);
+  const ngr = sum('mtd','ngr'), dep = sum('mtd','depositos'), turn = sum('mtd','turnover'),
+        spend = sum('mtd','spend'), ftdAmt = sum('mtd','ftdAmount');
+  const lNgr = sum('lm','ngr'), lDep = sum('lm','depositos'), lTurn = sum('lm','turnover'),
+        lSpend = sum('lm','spend'), lFtdAmt = sum('lm','ftdAmount');
+  const div = (a, b) => (b > 0 ? a / b : null);
+  const trendF = (M.ggr && M.ggr.act && M.ggrTrend && M.ggrTrend.act != null) ? M.ggrTrend.act / M.ggr.act : null;
+
+  // Retenção (nd exato) e DEP M0 vêm das tabelas por canal — mesma fonte dos cards.
+  const rsel = (retCh || []).filter(c => inSel(c.channel));
+  const nd = (n, d) => { let N = 0, D = 0; rsel.forEach(c => { if (c.nd) { N += c.nd[n] || 0; D += c.nd[d] || 0; } }); return D > 0 ? N / D : null; };
+  const dsel = (depCh || []).filter(c => inSel(c.channel));
+  const depM0Total = dsel.reduce((a, c) => a + (c.depM0 || 0), 0);
+  const depM0Growth = dsel.filter(c => c.invest != null).reduce((a, c) => a + (c.depM0 || 0), 0);
+
+  const mk = (m, act, m1) => ({ ...m, act: (act == null ? null : act), m1: (m1 === undefined ? null : m1) });
+  return {
+    ...M,
+    ftdAmount:   mk(M.ftdAmount, ftdAmt || null, lFtdAmt || null),
+    roasFtd:     mk(M.roasFtd, div(ftdAmt, spend), div(lFtdAmt, lSpend)),
+    invest:      mk(M.invest, spend || null, lSpend || null),
+    ggr:         mk(M.ggr, ngr || null, lNgr || null),
+    ggrPerDep:   mk(M.ggrPerDep, div(ngr, dep), div(lNgr, lDep)),
+    depTotal:    mk(M.depTotal, dep || null, lDep || null),
+    turnover:    mk(M.turnover, turn || null, lTurn || null),
+    hold:        mk(M.hold, div(ngr, turn), div(lNgr, lTurn)),
+    rollover:    mk(M.rollover, div(turn, dep), div(lTurn, lDep)),
+    ggrTrend:    mk(M.ggrTrend, (trendF != null && ngr) ? ngr * trendF : null, null),
+    retM0M1:     mk(M.retM0M1, nd('n1','d1'), null),
+    retM1M2:     mk(M.retM1M2, nd('n2','d2'), null),
+    retM3plus:   mk(M.retM3plus, nd('n3','d3'), null),
+    depM0Total:  mk(M.depM0Total, depM0Total || null, null),
+    depM0Growth: mk(M.depM0Growth, depM0Growth || null, null),
+  };
+}
+
+// Seleciona a série da safra diária conforme o filtro (novo shape {all,growth,byChannel} ou mock {totals,rows}).
+function selectDailyCohort_(dc, filter) {
+  if (!dc) return null;
+  if (dc.byChannel || dc.all || dc.growth) {
+    if (filter.channel) return (dc.byChannel && dc.byChannel[filter.channel]) || { totals: {}, rows: [] };
+    if (filter.scope === 'growth') return dc.growth || { totals: {}, rows: [] };
+    return dc.all || { totals: {}, rows: [] };
+  }
+  return dc; // mock antigo {totals, rows}
+}
+
 const PRESETS = [
   { id: 'mtd', label: 'MTD', range: () => {
       const from = firstOfMonthISO_(), to = todayISO_();
@@ -1232,6 +1286,7 @@ function App() {
     ggrChannels: MOCK_GGR_CHANNELS,
     ggrPayback: MOCK_GGR_PAYBACK,
     dailyCohort: MOCK_DAILY_COHORT,
+    componentsByChannel: null,
     depM0Channels: MOCK_DEPM0_CHANNELS,
     rolloverMatrix: MOCK_ROLLOVER_MATRIX,
     isLive: false,
@@ -1240,9 +1295,8 @@ function App() {
   const loadData = React.useCallback((opts = {}) => {
     if (!ENDPOINT_URL) return;
     setState(prev => ({ ...prev, loading: true, error: null }));
+    // Sempre busca o dataset completo (todos os canais); o filtro de canal é client-side (instantâneo).
     let url = `${ENDPOINT_URL}?key=${ACCESS_TOKEN}&from=${appliedRange.from}&to=${appliedRange.to}`;
-    if (chFilter.channel) url += `&channel=${encodeURIComponent(chFilter.channel)}`;
-    else if (chFilter.scope === 'growth') url += `&scope=growth`;
     if (opts.bustCache) url += `&refresh=true`;
     fetch(url)
       .then(r => {
@@ -1266,6 +1320,7 @@ function App() {
           ggrChannels: payload.ggrChannels,
           ggrPayback: payload.ggrPayback || prev.ggrPayback,
           dailyCohort: payload.dailyCohort || prev.dailyCohort,
+          componentsByChannel: payload.componentsByChannel || null,
           depM0Channels: payload.depM0Channels,
           rolloverMatrix: payload.rolloverMatrix,
           isLive: true,
@@ -1274,7 +1329,7 @@ function App() {
       .catch(err => {
         setState(prev => ({ ...prev, loading: false, error: String(err.message || err) }));
       });
-  }, [appliedRange.from, appliedRange.to, chFilter.channel, chFilter.scope]);
+  }, [appliedRange.from, appliedRange.to]); // canal/scope NÃO disparam fetch — filtro é client-side
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -1325,7 +1380,9 @@ function App() {
   const channelOptions = (state.channels || []).map(c => c.channel);
 
   // Heroes: live = backend já filtrado · mock = deriva das tabelas mock
-  const displayM = state.isLive ? state.M : deriveMockM_(state.M, chFilter);
+  const displayM = state.isLive
+    ? deriveLiveM_(state.M, chFilter, state.componentsByChannel, state.retentionChannels, state.depM0Channels)
+    : deriveMockM_(state.M, chFilter);
 
   function applyPreset(presetId) {
     const p = PRESETS.find(x => x.id === presetId);
@@ -1452,7 +1509,7 @@ function App() {
           retentionChannels={fRetentionChannels}
           ggrChannels={fGgrChannels}
           ggrPayback={state.ggrPayback}
-          dailyCohort={state.dailyCohort}
+          dailyCohort={selectDailyCohort_(state.dailyCohort, chFilter)}
           chFilter={chFilter}
           depM0Channels={fDepM0Channels}
           rolloverMatrix={fRolloverMatrix}

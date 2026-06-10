@@ -202,9 +202,11 @@ function buildPayload_(fromParam, toParam, filter) {
   const channels  = safeQuery_('channels',    () => queryChannels_(w, filter),              null, warnings);
   const ggrChannels = safeQuery_('ggrChannels', () => queryGgrChannels_(w, filter),         null, warnings);
   const ggrPayback = getGgrPayback_(warnings); // safras maduras, independe dos slicers (cache diário)
-  const dailyCohort = safeQuery_('dailyCohort', () => queryDailyCohort_(w, filter), null, warnings);
   const depM0 = safeQuery_('depM0', () => queryDepM0_(w, filter), { total: null, growth: null, m1Total: null, m1Growth: null, channels: null }, warnings);
   const rolloverMatrix = safeQuery_('rolloverMatrix', () => queryRolloverMatrix_(w, filter), null, warnings);
+  // Quebra por canal p/ filtro client-side instantâneo (sem re-query ao trocar de canal):
+  const componentsByChannel = safeQuery_('components', () => queryHeroComponentsByChannel_(w), null, warnings);
+  const dailyCohort = safeQuery_('dailyCohort', () => queryDailyCohort_(w), null, warnings);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
@@ -261,7 +263,8 @@ function buildPayload_(fromParam, toParam, filter) {
     retentionChannels: retention.channels,  // retenção de valor por canal — cohort wide monthly
     ggrChannels: ggrChannels,               // GGR (ngr) + ROAS GGR + freespin por canal — player_metrics
     ggrPayback: ggrPayback,                 // payback de GGR por canal (safras maduras 90d) — player_metrics
-    dailyCohort: dailyCohort,               // safra de FTD por dia (D0/D1/W1 + Tx Passagem) — cohort base + player_metrics
+    dailyCohort: dailyCohort,               // safra de FTD por dia, {all, growth, byChannel} — filtro client-side
+    componentsByChannel: componentsByChannel, // componentes dos hero cards por canal (mtd+lm) — filtro client-side
     depM0Channels: depM0.channels,          // DEP M0 por canal — cohort wide monthly
     rolloverMatrix: rolloverMatrix,         // rollover canal × tipo de jogo — player_metrics
   };
@@ -619,15 +622,112 @@ function queryGgrPayback_(asOf) {
   };
 }
 
-function queryDailyCohort_(w, filter) {
-  // Safra de FTD por dia (aba Safras Diárias). Segue os slicers de canal + data.
-  // Fontes: (1) cohort base = valores D0/D1/W1 + FTD#/$ + retenções (bate com o print do Luis);
-  //         (2) player_metrics por dia = cadastros + FTDs same-day;
-  //         (3) player_metrics com join de safra = qtd de DEPÓSITOS (transações) no D0 e D1, p/ tickets.
+// Componentes dos hero cards quebrados por canal (mtd + lm) — p/ o front filtrar canal sem re-fetch.
+// Mesmas fontes dos cards: player_metrics (ngr/depositos/turnover) + performance (spend/ftd).
+function queryHeroComponentsByChannel_(w) {
+  const houseSql = `
+    SELECT
+      IF(data_ref BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS bucket,
+      ${caseChannelExpr_()} AS channel,
+      SUM(ngr_total)       AS ngr,
+      SUM(valor_depositos) AS depositos,
+      SUM(IFNULL(valor_apostas_casino,0)+IFNULL(valor_apostas_esporte,0)+IFNULL(valor_apostas_loteria,0)) AS turnover
+    FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
+    WHERE data_ref BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
+    GROUP BY bucket, channel
+  `;
+  const perfSql = `
+    SELECT
+      IF(report_date BETWEEN DATE '${w.mtdStart}' AND DATE '${w.mtdEnd}', 'mtd', 'lm') AS bucket,
+      ${platformLabelExpr_('platform')} AS channel,
+      SUM(spend)      AS spend,
+      SUM(amount_ftd) AS ftd_amount,
+      SUM(qtd_ftd)    AS ftd_qty
+    FROM \`${PROJECT_ID}.analytics_performance.tbl_performance_daily\`
+    WHERE report_date BETWEEN DATE '${w.lmStart}' AND DATE '${w.mtdEnd}'
+    GROUP BY bucket, channel
+  `;
+  const by = {};
+  const slot = (ch, bk) => {
+    by[ch] = by[ch] || { mtd: {}, lm: {} };
+    return by[ch][bk === 'mtd' ? 'mtd' : 'lm'];
+  };
+  runQuery_(houseSql).forEach(r => {
+    const s = slot(r.channel, r.bucket);
+    s.ngr = numOrNull_(r.ngr); s.depositos = numOrNull_(r.depositos); s.turnover = numOrNull_(r.turnover);
+  });
+  runQuery_(perfSql).forEach(r => {
+    const s = slot(r.channel, r.bucket);
+    s.spend = numOrNull_(r.spend); s.ftdAmount = numOrNull_(r.ftd_amount); s.ftdQty = numOrNull_(r.ftd_qty);
+  });
+  return by;
+}
+
+// Monta {totals, rows} da safra diária somando um conjunto de canais por dia.
+// raw[canal][data] = { ftdQty, ftdAmt, d0, d1, w1, maxAge, reg, sameday, d0cnt, d1cnt }.
+function assembleDailyCohort_(raw, channelList) {
+  const byDate = {};
+  channelList.forEach(ch => {
+    const dates = raw[ch];
+    if (!dates) return;
+    Object.keys(dates).forEach(d => {
+      const s = dates[d];
+      const t = byDate[d] || (byDate[d] = { ftdQty:0, ftdAmt:0, d0:0, d1:0, w1:0, reg:0, sameday:0, d0cnt:0, d1cnt:0, mature:false });
+      t.ftdQty += s.ftdQty || 0; t.ftdAmt += s.ftdAmt || 0; t.d0 += s.d0 || 0;
+      t.reg += s.reg || 0; t.sameday += s.sameday || 0; t.d0cnt += s.d0cnt || 0;
+      if (s.maxAge != null && s.maxAge >= 1) { t.mature = true; t.d1 += s.d1 || 0; t.w1 += s.w1 || 0; t.d1cnt += s.d1cnt || 0; }
+    });
+  });
+  const dates = Object.keys(byDate).sort();
+  if (!dates.length) return null;
+
+  const T = { ftdQty:0, ftdAmt:0, d0:0, d1:0, w1:0, reg:0, sameday:0, d0cnt:0, d1cnt:0 };
+  const rows = dates.map(d => {
+    const t = byDate[d];
+    const d1 = t.mature ? t.d1 : null;
+    const w1 = t.mature ? t.w1 : null;
+    T.ftdQty += t.ftdQty; T.ftdAmt += t.ftdAmt; T.d0 += t.d0; T.reg += t.reg; T.sameday += t.sameday; T.d0cnt += t.d0cnt;
+    if (d1 != null) { T.d1 += d1; T.d1cnt += t.d1cnt; }
+    if (w1 != null) T.w1 += w1;
+    return {
+      date:     d,
+      txPass:   t.reg > 0 ? t.ftdQty / t.reg : null,
+      txPassSD: t.reg > 0 ? t.sameday / t.reg : null,
+      ftdQty:   t.ftdQty,
+      ftdAmt:   t.ftdAmt,
+      d0:       t.d0,
+      tktD0:    t.d0cnt > 0 ? t.d0 / t.d0cnt : null,
+      d1:       d1,
+      tktD1:    (d1 != null && t.d1cnt > 0) ? d1 / t.d1cnt : null,
+      retD1:    (d1 != null && t.d0 > 0) ? d1 / t.d0 : null,
+      w1:       w1,
+      retW1:    (w1 != null && t.d0 > 0) ? w1 / t.d0 : null,
+    };
+  });
+  const totals = {
+    txPass:   T.reg > 0 ? T.ftdQty / T.reg : null,
+    txPassSD: T.reg > 0 ? T.sameday / T.reg : null,
+    ftdQty:   T.ftdQty,
+    ftdAmt:   T.ftdAmt,
+    d0:       T.d0,
+    tktD0:    T.d0cnt > 0 ? T.d0 / T.d0cnt : null,
+    d1:       T.d1,
+    tktD1:    T.d1cnt > 0 ? T.d1 / T.d1cnt : null,
+    retD1:    T.d0 > 0 ? T.d1 / T.d0 : null,
+    w1:       T.w1,
+    retW1:    T.d0 > 0 ? T.w1 / T.d0 : null,
+  };
+  return { totals: totals, rows: rows };
+}
+
+function queryDailyCohort_(w) {
+  // Safra de FTD por dia (aba Safras Diárias), quebrada POR CANAL p/ o front filtrar sem re-fetch.
+  // Fontes: cohort base (valores/cadastros, bate com o print) + player_metrics (same-day + qtd depósitos).
   const from = w.mtdStart, to = w.mtdEnd;
 
   const cohortSql = `
     SELECT
+      ${platformLabelExpr_('platform')} AS channel,
       periodo AS d,
       MAX(days_since_ftd)                                          AS max_age,
       SUM(IF(days_since_ftd = 0, qtd_ftd, 0))                      AS ftd_qty,
@@ -638,22 +738,17 @@ function queryDailyCohort_(w, filter) {
       SUM(IF(days_since_ftd BETWEEN 1 AND 7, amount_deposito, 0))  AS w1
     FROM \`${PROJECT_ID}.analytics_cohorts.tbl_cohort_ftd_base\`
     WHERE periodo BETWEEN DATE '${from}' AND DATE '${to}'
-      ${platformWhere_(filter, 'platform')}
-    GROUP BY d
-    ORDER BY d
+    GROUP BY channel, d
   `;
-  // FTDs que cadastraram e depositaram no mesmo dia (numerador da Tx Passagem same-day).
-  // O denominador (cadastros) vem da cohort base p/ bater com o print.
   const samedaySql = `
     SELECT
+      ${caseChannelExpr_()} AS channel,
       data_ref AS d,
       SUM(IF(qtd_ftd > 0 AND DATE(data_cadastro) = data_ref, qtd_ftd, 0)) AS sameday_ftd
     FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
     WHERE data_ref BETWEEN DATE '${from}' AND DATE '${to}'
-      ${pmWhere_(filter)}
-    GROUP BY d
+    GROUP BY channel, d
   `;
-  // qtd de DEPÓSITOS (transações, inclui o FTD) no D0 e no D1, por data de FTD.
   const cntSql = `
     WITH ftd AS (
       SELECT
@@ -664,11 +759,11 @@ function queryDailyCohort_(w, filter) {
         ANY_VALUE(afiliado_nome)       AS afiliado_nome
       FROM \`${PROJECT_ID}.dados_clickhouse.player_metrics\`
       WHERE qtd_ftd > 0 AND data_ref BETWEEN DATE '${from}' AND DATE '${to}'
-        ${pmWhere_(filter)}
       GROUP BY account_id
     ),
-    labeled AS ( SELECT account_id, ftd_date FROM ftd )
+    labeled AS ( SELECT account_id, ftd_date, ${caseChannelExpr_()} AS channel FROM ftd )
     SELECT
+      l.channel AS channel,
       l.ftd_date AS d,
       SUM(IF(DATE_DIFF(pm.data_ref, l.ftd_date, DAY) = 0, pm.qtd_depositos, 0)) AS d0_cnt,
       SUM(IF(DATE_DIFF(pm.data_ref, l.ftd_date, DAY) = 1, pm.qtd_depositos, 0)) AS d1_cnt
@@ -676,7 +771,7 @@ function queryDailyCohort_(w, filter) {
     JOIN labeled l USING (account_id)
     WHERE pm.data_ref BETWEEN DATE '${from}' AND DATE_ADD(DATE '${to}', INTERVAL 1 DAY)
       AND DATE_DIFF(pm.data_ref, l.ftd_date, DAY) BETWEEN 0 AND 1
-    GROUP BY d
+    GROUP BY channel, d
   `;
 
   const cohortRows = runQuery_(cohortSql);
@@ -684,62 +779,33 @@ function queryDailyCohort_(w, filter) {
   const samedayRows = runQuery_(samedaySql);
   const cntRows = runQuery_(cntSql);
 
-  const samedayByDate = {}, cntByDate = {};
-  samedayRows.forEach(r => { samedayByDate[r.d] = numOrNull_(r.sameday_ftd) || 0; });
-  cntRows.forEach(r => { cntByDate[r.d] = { d0: numOrNull_(r.d0_cnt) || 0, d1: numOrNull_(r.d1_cnt) || 0 }; });
-
-  let tFtdQty = 0, tFtdAmt = 0, tD0 = 0, tD1 = 0, tW1 = 0, tReg = 0, tSameday = 0, tD0cnt = 0, tD1cnt = 0;
-  const rows = cohortRows.map(r => {
-    const maxAge = numOrNull_(r.max_age);
-    const ftdQty = numOrNull_(r.ftd_qty) || 0;
-    const ftdAmt = numOrNull_(r.ftd_amt) || 0;
-    const d0 = numOrNull_(r.d0) || 0;
-    const matured = maxAge != null && maxAge >= 1; // safra já tem ao menos o dia 1
-    const d1 = matured ? (numOrNull_(r.d1) || 0) : null;
-    const w1 = matured ? (numOrNull_(r.w1) || 0) : null;
-    const reg = numOrNull_(r.registros) || 0;   // cadastros da cohort base (platform) — bate com o print
-    const sameday = samedayByDate[r.d] || 0;     // same-day FTDs da player_metrics
-    const ct = cntByDate[r.d] || { d0: 0, d1: 0 };
-
-    tFtdQty += ftdQty; tFtdAmt += ftdAmt; tD0 += d0; tReg += reg; tSameday += sameday; tD0cnt += ct.d0;
-    if (d1 != null) { tD1 += d1; tD1cnt += ct.d1; }
-    if (w1 != null) tW1 += w1;
-
-    return {
-      date:    r.d,
-      txPass:  reg > 0 ? ftdQty / reg : null,
-      txPassSD: reg > 0 ? sameday / reg : null,
-      ftdQty:  ftdQty,
-      ftdAmt:  ftdAmt,
-      d0:      d0,
-      tktD0:   ct.d0 > 0 ? d0 / ct.d0 : null,
-      d1:      d1,
-      tktD1:   (d1 != null && ct.d1 > 0) ? d1 / ct.d1 : null,
-      retD1:   (d1 != null && d0 > 0) ? d1 / d0 : null,
-      w1:      w1,
-      retW1:   (w1 != null && d0 > 0) ? w1 / d0 : null,
-    };
-  });
-
-  const totals = {
-    txPass:   tReg > 0 ? tFtdQty / tReg : null,
-    txPassSD: tReg > 0 ? tSameday / tReg : null,
-    ftdQty:   tFtdQty,
-    ftdAmt:   tFtdAmt,
-    d0:       tD0,
-    tktD0:    tD0cnt > 0 ? tD0 / tD0cnt : null,
-    d1:       tD1,
-    tktD1:    tD1cnt > 0 ? tD1 / tD1cnt : null,
-    retD1:    tD0 > 0 ? tD1 / tD0 : null,
-    w1:       tW1,
-    retW1:    tD0 > 0 ? tW1 / tD0 : null,
+  const raw = {};
+  const cell = (ch, d) => {
+    raw[ch] = raw[ch] || {};
+    return raw[ch][d] = raw[ch][d] || { ftdQty:0, ftdAmt:0, d0:0, d1:0, w1:0, maxAge:null, reg:0, sameday:0, d0cnt:0, d1cnt:0 };
   };
+  cohortRows.forEach(r => {
+    const c = cell(r.channel, r.d);
+    c.maxAge = numOrNull_(r.max_age);
+    c.ftdQty = numOrNull_(r.ftd_qty) || 0;
+    c.ftdAmt = numOrNull_(r.ftd_amt) || 0;
+    c.reg    = numOrNull_(r.registros) || 0;
+    c.d0     = numOrNull_(r.d0) || 0;
+    c.d1     = numOrNull_(r.d1) || 0;
+    c.w1     = numOrNull_(r.w1) || 0;
+  });
+  samedayRows.forEach(r => { cell(r.channel, r.d).sameday = numOrNull_(r.sameday_ftd) || 0; });
+  cntRows.forEach(r => { const c = cell(r.channel, r.d); c.d0cnt = numOrNull_(r.d0_cnt) || 0; c.d1cnt = numOrNull_(r.d1_cnt) || 0; });
 
-  const channelLabel = filter.channel
-    ? filter.channel
-    : (filter.scope === 'growth' ? 'Canais Growth' : 'Total Casa');
+  const allChannels = Object.keys(raw);
+  const byChannel = {};
+  allChannels.forEach(ch => { const s = assembleDailyCohort_(raw, [ch]); if (s) byChannel[ch] = s; });
 
-  return { channelLabel: channelLabel, totals: totals, rows: rows };
+  return {
+    all:       assembleDailyCohort_(raw, allChannels),
+    growth:    assembleDailyCohort_(raw, GROWTH_CHANNELS),
+    byChannel: byChannel,
+  };
 }
 
 function queryDepM0_(w, filter) {
