@@ -1467,7 +1467,7 @@ function App() {
           <label>Canal</label>
           <select
             value={chFilter.channel || ''}
-            onChange={e => setChFilter({ channel: e.target.value || null, scope: 'all' })}
+            onChange={e => setChFilter(f => ({ ...f, channel: e.target.value || null }))}
           >
             <option value="">Todos</option>
             {channelOptions.map((c, i) => <option key={i} value={c}>{c}</option>)}
@@ -1475,16 +1475,16 @@ function App() {
         </div>
         <div className="slicer-presets">
           <button
-            className={`preset-btn ${!chFilter.channel && chFilter.scope === 'growth' ? 'active' : ''}`}
-            onClick={() => setChFilter({ channel: null, scope: 'growth' })}
-            title="Só canais de mídia paga (Meta, Google, TikTok, Kwai)"
+            className={`preset-btn ${chFilter.scope === 'growth' ? 'active' : ''}`}
+            onClick={() => setChFilter(f => ({ ...f, scope: 'growth' }))}
+            title="Universo = só mídia paga (Meta, Google, TikTok, Kwai). Define o que 'Todos' mostra."
           >
             Canais Growth
           </button>
           <button
-            className={`preset-btn ${!chFilter.channel && chFilter.scope === 'all' ? 'active' : ''}`}
-            onClick={() => setChFilter({ channel: null, scope: 'all' })}
-            title="Casa toda, sem filtro de canal"
+            className={`preset-btn ${chFilter.scope === 'all' ? 'active' : ''}`}
+            onClick={() => setChFilter(f => ({ ...f, scope: 'all' }))}
+            title="Universo = casa toda. Define o que 'Todos' mostra."
           >
             Total Casa
           </button>
