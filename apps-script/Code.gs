@@ -361,9 +361,11 @@ function queryChannels_(w, filter) {
 }
 
 function queryRetention_(w, filter) {
-  // Retenção de VALOR depositado (R$), por canal + casa toda.
-  // M0→M1 / M1→M2: média das safras (desde 2025-01) com janela completa.
-  // M3+: pool de safras antigas (age>=3): depósito no mês ref ÷ mesmo pool no mês anterior.
+  // Retenção de VALOR depositado (R$) — NÃO acumulada, mês contra mês (MTD cru).
+  // Cada linha olha uma safra pela sua idade no mês de referência:
+  //   M0→M1 = safra idade 1 (mês anterior): _1 (dep. neste mês) ÷ _0 (dep. mês anterior)
+  //   M1→M2 = safra idade 2: _2 ÷ _1
+  //   M3+   = pool idade ≥3: Σ dep. neste mês (_age) ÷ Σ dep. mês anterior (_age-1)
   const refMonth = w.mtdStart.slice(0, 7) + '-01';
 
   const ages = [];
@@ -383,12 +385,12 @@ function queryRetention_(w, filter) {
     )
     SELECT
       channel,
-      SUM(_0) AS m0_total,
+      SUM(IF(age = 1, _0, 0)) AS m0_total,
       SUM(valor_investido) AS invest,
-      SUM(IF(age >= 2, _1, 0)) AS n1,
-      SUM(IF(age >= 2, _0, 0)) AS d1,
-      SUM(IF(age >= 3, _2, 0)) AS n2,
-      SUM(IF(age >= 3, _1, 0)) AS d2,
+      SUM(IF(age = 1, _1, 0)) AS n1,
+      SUM(IF(age = 1, _0, 0)) AS d1,
+      SUM(IF(age = 2, _2, 0)) AS n2,
+      SUM(IF(age = 2, _1, 0)) AS d2,
       SUM(CASE age ${caseThis} ELSE 0 END) AS n3,
       SUM(CASE age ${casePrev} ELSE 0 END) AS d3
     FROM base
