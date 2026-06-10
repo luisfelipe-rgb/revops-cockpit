@@ -4,7 +4,7 @@
 
 const PROJECT_ID = 'db-clickhouse';
 const TZ = 'America/Sao_Paulo';
-const CACHE_TTL_SECONDS = 15 * 60;
+const CACHE_TTL_SECONDS = 60 * 60; // 1h (era 15min) — corta ~4× as queries/custo
 const ACCESS_TOKEN = 'rvops_5fa28e9c4b1d3a7f';
 
 // Canais Growth = mídia paga. Labels canônicos.
