@@ -239,6 +239,11 @@
     color: var(--text-muted); text-transform: uppercase;
     letter-spacing: .08em; margin-bottom: 14px;
   }
+  .ch-note {
+    margin-top: 12px; font-size: 11px; line-height: 1.6;
+    color: var(--text-dim); max-width: 880px;
+  }
+  .ch-note strong { color: var(--text-muted); font-weight: 600; }
   /* Composition bars */
   .hbar-list { display: flex; flex-direction: column; gap: 12px; }
   .hbar {
@@ -377,6 +382,20 @@ const MOCK_GGR_CHANNELS = [
   { channel: 'Afiliados',     ggr: 121700, spend: null, freespin: 9800 },
   { channel: 'Social Media',  ggr: 54300,  spend: null, freespin: 4100 },
 ];
+
+// Mock — payback de GGR por canal (modo dev). Live vem de payload.ggrPayback.
+// paybackDays = dias até o GGR acumulado da safra cobrir o investimento (safras maduras, horizonte 90d).
+const MOCK_GGR_PAYBACK = {
+  horizonDays: 90,
+  cohortFrom: '2025-12-12', cohortTo: '2026-03-12', asOf: '2026-06-09',
+  byChannel: {
+    'Meta':   { paybackDays: 34, reached: true,  spend: 1842300, ggrH: 2103400, roasH: 1.14 },
+    'Google': { paybackDays: 41, reached: true,  spend: 1120800, ggrH: 1198900, roasH: 1.07 },
+    'TikTok': { paybackDays: 67, reached: true,  spend: 421500,  ggrH: 438100,  roasH: 1.04 },
+    'Kwai':   { paybackDays: null, reached: false, spend: 182525, ggrH: 121300, roasH: 0.66 },
+  },
+  total: { paybackDays: 38, reached: true, spend: 3567125, ggrH: 3861700, roasH: 1.08 },
+};
 
 // Mock — DEP M0 por canal (modo dev). Live vem de payload.depM0Channels.
 const MOCK_DEPM0_CHANNELS = [
@@ -591,7 +610,7 @@ function ChannelTable({ channels }) {
 //   ROAS GGR = GGR ÷ Investimento
 // ============================================================
 
-function GgrChannelTable({ channels }) {
+function GgrChannelTable({ channels, payback }) {
   const tot = channels.reduce((a, c) => ({
     ggr: a.ggr + (c.ggr || 0),
     spend: a.spend + (c.spend || 0),
@@ -608,6 +627,15 @@ function GgrChannelTable({ channels }) {
     <td className={v != null && v < 0 ? 'ch-roas-neg' : ''}>{fmtBRL(v)}</td>
   );
 
+  // Payback de GGR (safras maduras, horizonte H). p = { paybackDays, reached } por canal.
+  const H = (payback && payback.horizonDays) || 90;
+  const byCh = (payback && payback.byChannel) || {};
+  const paybackCell = (p) => {
+    if (!p || p.spend == null) return <td title="Canal sem investimento — payback não se aplica">—</td>;
+    if (p.paybackDays == null) return <td className="ch-roas-neg" title={`Não atingiu o payback em ${H} dias`}>{`>${H}d`}</td>;
+    return <td className="ch-roas-pos">{`${p.paybackDays}d`}</td>;
+  };
+
   return (
     <table className="ch-table">
       <thead>
@@ -616,6 +644,7 @@ function GgrChannelTable({ channels }) {
           <th>GGR</th>
           <th>Investimento</th>
           <th>ROAS GGR</th>
+          <th>Payback GGR</th>
           <th>FreeSpins</th>
         </tr>
       </thead>
@@ -626,6 +655,7 @@ function GgrChannelTable({ channels }) {
             {ggrCell(c.ggr)}
             <td>{fmtBRL(c.spend)}</td>
             {roasCell(roasGgr(c))}
+            {paybackCell(byCh[c.channel])}
             <td>{fmtBRL(c.freespin)}</td>
           </tr>
         ))}
@@ -636,6 +666,7 @@ function GgrChannelTable({ channels }) {
           {ggrCell(tot.ggr)}
           <td>{fmtBRL(tot.spend)}</td>
           {roasCell(tot.spend > 0 ? tot.ggr / tot.spend : null)}
+          {paybackCell(payback && payback.total)}
           <td>{tot.hasFreespin ? fmtBRL(tot.freespin) : '—'}</td>
         </tr>
       </tfoot>
@@ -865,7 +896,8 @@ function TabDepositos({ M, depM0Channels }) {
   );
 }
 
-function TabGgr({ M, ggrChannels }) {
+function TabGgr({ M, ggrChannels, ggrPayback }) {
+  const H = (ggrPayback && ggrPayback.horizonDays) || 90;
   return (
     <React.Fragment>
       <div className="tab-header">
@@ -882,7 +914,12 @@ function TabGgr({ M, ggrChannels }) {
       {ggrChannels && ggrChannels.length > 0 && (
         <div className="support">
           <div className="support-title">GGR por Canal</div>
-          <GgrChannelTable channels={ggrChannels} />
+          <GgrChannelTable channels={ggrChannels} payback={ggrPayback} />
+          <div className="ch-note">
+            <strong>Payback GGR</strong> = dias até o GGR (NGR) acumulado da safra cobrir o investimento.
+            Base independente do filtro de data: safras maduras (FTD há ≥{H} dias), horizonte de {H} dias.
+            <span className="ch-roas-neg">{` >${H}d`}</span> = não atingiu o payback dentro do horizonte.
+          </div>
         </div>
       )}
     </React.Fragment>
@@ -1046,6 +1083,7 @@ function App() {
     channels: MOCK_CHANNELS,
     retentionChannels: MOCK_RETENTION_CHANNELS,
     ggrChannels: MOCK_GGR_CHANNELS,
+    ggrPayback: MOCK_GGR_PAYBACK,
     depM0Channels: MOCK_DEPM0_CHANNELS,
     rolloverMatrix: MOCK_ROLLOVER_MATRIX,
     isLive: false,
@@ -1078,6 +1116,7 @@ function App() {
           channels: payload.channels,
           retentionChannels: payload.retentionChannels,
           ggrChannels: payload.ggrChannels,
+          ggrPayback: payload.ggrPayback || prev.ggrPayback,
           depM0Channels: payload.depM0Channels,
           rolloverMatrix: payload.rolloverMatrix,
           isLive: true,
@@ -1263,6 +1302,7 @@ function App() {
           channels={fChannels}
           retentionChannels={fRetentionChannels}
           ggrChannels={fGgrChannels}
+          ggrPayback={state.ggrPayback}
           depM0Channels={fDepM0Channels}
           rolloverMatrix={fRolloverMatrix}
           isLive={state.isLive}
