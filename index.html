@@ -350,8 +350,10 @@ const MOCK_ROLLOVER_MATRIX = {
   ],
 };
 
-// Canais Growth (mídia paga) — labels canônicos, usados pelo filtro client-side
-const GROWTH_CHANNELS = ['Meta', 'Google', 'TikTok', 'Kwai'];
+// Growth = TODOS os canais EXCETO social/orgânico/afiliados (regra por exclusão;
+// Programática e canais novos entram automaticamente). Usado no filtro client-side.
+const NON_GROWTH_CHANNELS = ['Social Media', 'Afiliados', 'Orgânico (sem atribuição)'];
+const isGrowthCh_ = (ch) => NON_GROWTH_CHANNELS.indexOf(ch) < 0;
 
 const CLUSTER_DEP = [
   { label: '% DEP Novos', value: 0.7196 },
@@ -1153,7 +1155,7 @@ function deriveMockM_(M, filter) {
   if (!filter.channel && filter.scope !== 'growth') return M;
   const pick = (list, isPaid) => filter.channel
     ? list.filter(c => c.channel === filter.channel)
-    : list.filter(c => isPaid ? isPaid(c) : GROWTH_CHANNELS.indexOf(c.channel) >= 0);
+    : list.filter(c => isGrowthCh_(c.channel));
 
   const ch = pick(MOCK_CHANNELS, c => c.spend != null);
   const gg = pick(MOCK_GGR_CHANNELS, c => c.spend != null);
@@ -1202,7 +1204,7 @@ function deriveMockM_(M, filter) {
 // Live: deriva os hero cards do canal/scope a partir dos componentes por canal (exato, mesma fonte do backend).
 function deriveLiveM_(M, filter, comp, retCh, depCh) {
   if ((!filter.channel && filter.scope !== 'growth') || !comp) return M;
-  const inSel = (ch) => filter.channel ? ch === filter.channel : GROWTH_CHANNELS.indexOf(ch) >= 0;
+  const inSel = (ch) => filter.channel ? ch === filter.channel : isGrowthCh_(ch);
   const sel = Object.keys(comp).filter(inSel);
   const sum = (bk, key) => sel.reduce((a, ch) => {
     const c = comp[ch] && comp[ch][bk]; return a + ((c && c[key]) || 0);
@@ -1219,7 +1221,7 @@ function deriveLiveM_(M, filter, comp, retCh, depCh) {
   const nd = (n, d) => { let N = 0, D = 0; rsel.forEach(c => { if (c.nd) { N += c.nd[n] || 0; D += c.nd[d] || 0; } }); return D > 0 ? N / D : null; };
   const dsel = (depCh || []).filter(c => inSel(c.channel));
   const depM0Total = dsel.reduce((a, c) => a + (c.depM0 || 0), 0);
-  const depM0Growth = dsel.filter(c => c.invest != null).reduce((a, c) => a + (c.depM0 || 0), 0);
+  const depM0Growth = dsel.filter(c => isGrowthCh_(c.channel)).reduce((a, c) => a + (c.depM0 || 0), 0);
 
   const mk = (m, act, m1) => ({ ...m, act: (act == null ? null : act), m1: (m1 === undefined ? null : m1) });
   return {
@@ -1363,7 +1365,7 @@ function App() {
     if (!list) return list;
     if (chFilter.channel) return list.filter(c => c.channel === chFilter.channel);
     if (chFilter.scope === 'growth') {
-      return list.filter(c => isPaid ? isPaid(c) : GROWTH_CHANNELS.indexOf(c.channel) >= 0);
+      return list.filter(c => isGrowthCh_(c.channel));
     }
     return list;
   }

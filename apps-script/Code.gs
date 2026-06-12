@@ -8,7 +8,10 @@ const CACHE_TTL_SECONDS = 60 * 60; // 1h (era 15min) — corta ~4× as queries/c
 const ACCESS_TOKEN = 'rvops_5fa28e9c4b1d3a7f';
 
 // Canais Growth = mídia paga. Labels canônicos.
-const GROWTH_CHANNELS = ['Meta', 'Google', 'TikTok', 'Kwai', 'Programática'];
+// Growth = TODOS os canais EXCETO os abaixo (regra por exclusão — Programática e
+// qualquer canal novo entram automaticamente; só ficam fora social/orgânico/afiliados).
+const NON_GROWTH_CHANNELS = ['Social Media', 'Afiliados', 'Orgânico (sem atribuição)'];
+function isGrowth_(ch) { return NON_GROWTH_CHANNELS.indexOf(ch) < 0; }
 
 // ============================================================
 // ENTRY POINT
@@ -133,8 +136,8 @@ function caseChannelExpr_() {
 function pmWhere_(filter) {
   if (filter.channel) return `AND ${caseChannelExpr_()} = '${esc_(filter.channel)}'`;
   if (filter.scope === 'growth') {
-    const list = GROWTH_CHANNELS.map(c => `'${esc_(c)}'`).join(', ');
-    return `AND ${caseChannelExpr_()} IN (${list})`;
+    const list = NON_GROWTH_CHANNELS.map(c => `'${esc_(c)}'`).join(', ');
+    return `AND ${caseChannelExpr_()} NOT IN (${list})`;
   }
   return '';
 }
@@ -420,7 +423,7 @@ function queryChannels_(w, filter) {
   }).filter(c => (c.ftdQty || 0) > 0 || c.spend != null);
 
   if (filter.scope === 'growth' && !filter.channel) {
-    channels = channels.filter(c => c.spend != null);
+    channels = channels.filter(c => isGrowth_(c.channel));
   }
 
   return channels.sort((a, b) => {
@@ -548,7 +551,7 @@ function queryGgrChannels_(w, filter) {
 
   let channels = Object.values(byChannel);
   if (filter.scope === 'growth' && !filter.channel) {
-    channels = channels.filter(c => GROWTH_CHANNELS.indexOf(c.channel) >= 0);
+    channels = channels.filter(c => isGrowth_(c.channel));
   }
 
   return channels.sort((a, b) => {
@@ -861,7 +864,7 @@ function queryDailyCohort_(w) {
 
   return {
     all:       assembleDailyCohort_(raw, allChannels),
-    growth:    assembleDailyCohort_(raw, GROWTH_CHANNELS),
+    growth:    assembleDailyCohort_(raw, allChannels.filter(isGrowth_)),
     byChannel: byChannel,
   };
 }
@@ -891,11 +894,12 @@ function queryDepM0_(w, filter) {
   rows.forEach(r => {
     const dep = numOrNull_(r.dep_m0) || 0;
     const invest = numOrNull_(r.invest) || 0;
-    const isPaid = invest > 0;
-    if (growthOnly && !isPaid) return;
+    const isPaid = invest > 0;          // tem investimento → mostra ROAS M0
+    const growthCh = isGrowth_(r.channel); // classificação de growth (exclusão)
+    if (growthOnly && !growthCh) return;
     if (r.bucket === 'mtd') {
       total += dep;
-      if (isPaid) growth += dep;
+      if (growthCh) growth += dep;
       channels.push({
         channel: r.channel,
         depM0: dep,
@@ -903,7 +907,7 @@ function queryDepM0_(w, filter) {
       });
     } else {
       m1Total += dep;
-      if (isPaid) m1Growth += dep;
+      if (growthCh) m1Growth += dep;
     }
   });
 
@@ -949,7 +953,7 @@ function queryRolloverMatrix_(w, filter) {
   }).filter(r => r.weight != null && r.weight > 0); // sem depósito → rollover indefinido
 
   if (filter.scope === 'growth' && !filter.channel) {
-    list = list.filter(r => GROWTH_CHANNELS.indexOf(r.channel) >= 0);
+    list = list.filter(r => isGrowth_(r.channel));
   }
 
   list.sort((a, b) => (b.weight || 0) - (a.weight || 0));
