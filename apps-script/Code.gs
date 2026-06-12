@@ -196,7 +196,7 @@ function normalizeChannel_(raw) {
 //  - Programática: sem spend rastreado → Investimento = (FTDs da Programática, cohort base) × R$ 90.
 //  - Meta: imposto de fechamento ~13,83% → Investimento = spend × 1,1383 (sempre).
 // Aplica nas tabelas (channels, ggrChannels), nos componentes dos cards e no total (perfAgg).
-function applyInvestAdjustments_(channels, ggrChannels, comp, perfAgg) {
+function applyInvestAdjustments_(channels, ggrChannels, comp, perfAgg, depM0Channels) {
   const META_TAX = 1.1383, CPA = 90;
   let progFtd = 0, progAmt = null;
   if (channels) {
@@ -205,12 +205,19 @@ function applyInvestAdjustments_(channels, ggrChannels, comp, perfAgg) {
   }
   const progSpend = progFtd * CPA;
 
+  // tabelas que guardam o investimento no campo `spend`
   const fixList = (list) => { if (!list) return; list.forEach(c => {
     if (c.channel === 'Meta') { if (c.spend != null) c.spend = c.spend * META_TAX; }
     else if (c.channel === 'Programática') c.spend = progSpend > 0 ? progSpend : null;
   }); };
   fixList(channels);
   fixList(ggrChannels);
+
+  // DEP M0 (aba Depósitos) guarda o investimento no campo `invest` → mesmo ajuste p/ ROAS M0
+  if (depM0Channels) depM0Channels.forEach(c => {
+    if (c.channel === 'Meta') { if (c.invest != null) c.invest = c.invest * META_TAX; }
+    else if (c.channel === 'Programática') c.invest = progSpend > 0 ? progSpend : c.invest;
+  });
 
   if (comp) {
     Object.keys(comp).forEach(ch => {
@@ -257,7 +264,7 @@ function buildPayload_(fromParam, toParam, filter) {
   const dailyCohort = safeQuery_('dailyCohort', () => queryDailyCohort_(w), null, warnings);
 
   // Ajustes manuais de investimento (Programática manual + imposto Meta) — antes de montar os KPIs.
-  applyInvestAdjustments_(channels, ggrChannels, componentsByChannel, perfAgg);
+  applyInvestAdjustments_(channels, ggrChannels, componentsByChannel, perfAgg, depM0 && depM0.channels);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
