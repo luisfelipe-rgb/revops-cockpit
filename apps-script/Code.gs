@@ -192,6 +192,54 @@ function normalizeChannel_(raw) {
 // PAYLOAD BUILDER
 // ============================================================
 
+// Ajustes MANUAIS de investimento por canal (não vêm do BQ):
+//  - Programática: sem spend rastreado → Investimento = (FTDs da Programática, cohort base) × R$ 90.
+//  - Meta: imposto de fechamento ~13,83% → Investimento = spend × 1,1383 (sempre).
+// Aplica nas tabelas (channels, ggrChannels), nos componentes dos cards e no total (perfAgg).
+function applyInvestAdjustments_(channels, ggrChannels, comp, perfAgg) {
+  const META_TAX = 1.1383, CPA = 90;
+  let progFtd = 0, progAmt = null;
+  if (channels) {
+    const pc = channels.filter(c => c.channel === 'Programática')[0];
+    if (pc) { progFtd = pc.ftdQty || 0; progAmt = pc.ftdAmount; }
+  }
+  const progSpend = progFtd * CPA;
+
+  const fixList = (list) => { if (!list) return; list.forEach(c => {
+    if (c.channel === 'Meta') { if (c.spend != null) c.spend = c.spend * META_TAX; }
+    else if (c.channel === 'Programática') c.spend = progSpend > 0 ? progSpend : null;
+  }); };
+  fixList(channels);
+  fixList(ggrChannels);
+
+  if (comp) {
+    Object.keys(comp).forEach(ch => {
+      if (ch !== 'Meta') return;
+      ['mtd', 'lm'].forEach(bk => { const s = comp[ch][bk]; if (s && s.spend != null) s.spend = s.spend * META_TAX; });
+    });
+    if (progSpend > 0) {
+      comp['Programática'] = comp['Programática'] || { mtd: {}, lm: {} };
+      comp['Programática'].mtd = comp['Programática'].mtd || {};
+      comp['Programática'].lm = comp['Programática'].lm || {};
+      comp['Programática'].mtd.spend = progSpend;
+      comp['Programática'].mtd.ftdAmount = progAmt;   // FTD$ da cohort base p/ ROAS FTD do card bater com a tabela
+      comp['Programática'].mtd.ftdQty = progFtd;
+      comp['Programática'].lm.spend = null;           // sem FTD de cohort do mês anterior → sem Δ M-1
+    }
+    // Total Casa invest = soma dos componentes ajustados
+    if (perfAgg) {
+      let mtd = 0, lm = 0;
+      Object.keys(comp).forEach(ch => {
+        const m = comp[ch].mtd, l = comp[ch].lm;
+        if (m && m.spend != null) mtd += m.spend;
+        if (l && l.spend != null) lm += l.spend;
+      });
+      if (perfAgg.mtd) perfAgg.mtd.spend = mtd;
+      if (perfAgg.lm) perfAgg.lm.spend = lm;
+    }
+  }
+}
+
 function buildPayload_(fromParam, toParam, filter) {
   filter = filter || { channel: null, scope: 'all' };
   const w = windows_(fromParam, toParam);
@@ -207,6 +255,9 @@ function buildPayload_(fromParam, toParam, filter) {
   // Quebra por canal p/ filtro client-side instantâneo (sem re-query ao trocar de canal):
   const componentsByChannel = safeQuery_('components', () => queryHeroComponentsByChannel_(w), null, warnings);
   const dailyCohort = safeQuery_('dailyCohort', () => queryDailyCohort_(w), null, warnings);
+
+  // Ajustes manuais de investimento (Programática manual + imposto Meta) — antes de montar os KPIs.
+  applyInvestAdjustments_(channels, ggrChannels, componentsByChannel, perfAgg);
 
   const mtd = houseAgg.mtd;
   const lm = houseAgg.lm;
