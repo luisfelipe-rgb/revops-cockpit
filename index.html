@@ -1559,7 +1559,7 @@ function App() {
           ggrChannels: payload.ggrChannels,
           ggrPayback: payload.ggrPayback || prev.ggrPayback,
           dailyCohort: payload.dailyCohort || prev.dailyCohort,
-          retencaoFaixa: payload.retencaoFaixa || [],  // live sem o campo (back não deployado) → vazio, não mock
+          retencaoFaixa: payload.retencaoFaixa || prev.retencaoFaixa,  // cai no mock até o backend mandar (igual às outras abas)
           componentsByChannel: payload.componentsByChannel || null,
           depM0Channels: payload.depM0Channels,
           rolloverMatrix: payload.rolloverMatrix,
