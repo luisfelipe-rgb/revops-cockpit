@@ -1301,7 +1301,9 @@ function benchApostouRows_(retencaoFaixa) {
 function aggBench_(rows, sel) {
   const out = { qtd: 0, ftd: 0, d0: 0, cd1: 0, vd1: 0, cw1: 0, vw1: 0, cm0: 0, vm0: 0 };
   (rows || []).forEach(r => {
-    if (sel.canal && sel.canal !== 'all' && r.canal !== sel.canal) return;
+    // canal específico tem precedência; senão, scope 'growth' = só mídia paga (exclui social/orgânico/afiliados)
+    if (sel.canal && sel.canal !== 'all') { if (r.canal !== sel.canal) return; }
+    else if (sel.scope === 'growth' && !isGrowthCh_(r.canal)) return;
     if (sel.faixa && sel.faixa !== 'all' && r.faixa !== sel.faixa) return;
     if (sel.mesFrom && r.mes < sel.mesFrom) return;
     if (sel.mesTo && r.mes > sel.mesTo) return;
@@ -1367,6 +1369,7 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
   const faixaOptions = (benchmark && benchmark.faixas) || FAIXA_LIST;
 
   const [canal, setCanal] = React.useState('all');
+  const [scope, setScope] = React.useState('all');   // 'all' (Total Casa) | 'growth' (só mídia paga) — define o que 'Todos' agrega
   const [faixa, setFaixa] = React.useState('all');
   const [mode, setMode] = React.useState('qtd');     // 'qtd' (% redepositou) | 'val' (multiplicador $)
   const [aptFrom, setAptFrom] = React.useState(null);
@@ -1380,12 +1383,14 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
   React.useEffect(() => { if (aptMonths.length) { setAptFrom(aptMonths[0]); setAptTo(aptMonths[aptMonths.length - 1]); } }, [aptKey]);
   React.useEffect(() => { if (houseMonths.length) { setHouseFrom(houseMonths[0]); setHouseTo(houseMonths[houseMonths.length - 1]); } }, [houseKey]);
 
-  const apt = benchMetrics_(aggBench_(aptRows, { canal, faixa, mesFrom: aptFrom, mesTo: aptTo }), mode);
+  const apt = benchMetrics_(aggBench_(aptRows, { canal, scope, faixa, mesFrom: aptFrom, mesTo: aptTo }), mode);
   const houses = BENCH_HOUSE_ORDER.map(h => ({
     key: h,
     label: (benchmark && benchmark.houses && benchmark.houses[h] && benchmark.houses[h].label) || h,
-    m: benchMetrics_(aggBench_(houseRowsMap[h], { canal, faixa, mesFrom: houseFrom, mesTo: houseTo }), mode),
+    m: benchMetrics_(aggBench_(houseRowsMap[h], { canal, scope, faixa, mesFrom: houseFrom, mesTo: houseTo }), mode),
   }));
+  // Rótulo do escopo de canal p/ os títulos das tabelas
+  const canalLabel = canal !== 'all' ? canal : (scope === 'growth' ? 'Canais Growth' : 'todos os canais');
 
   const fmtRet = (x) => mode === 'qtd' ? fmtPct(x, 1) : fmtMultiple(x);
   const retHdr = mode === 'qtd' ? 'Ret %' : 'Ret ×';
@@ -1442,6 +1447,10 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
             <option value="all">Todos</option>
             {canalOptions.map((c, i) => <option key={i} value={c}>{c}</option>)}
           </select>
+          <div className="slicer-presets">
+            <button className={`preset-btn ${scope === 'growth' ? 'active' : ''}`} onClick={() => setScope('growth')} title="Universo = só mídia paga (exclui Social Media, Orgânico e Afiliados). Define o que 'Todos' agrega.">Growth</button>
+            <button className={`preset-btn ${scope === 'all' ? 'active' : ''}`} onClick={() => setScope('all')} title="Universo = casa toda.">Total Casa</button>
+          </div>
         </div>
         <div className="slicer-group">
           <label style={lblStyle}>Faixa FTD</label>
@@ -1473,7 +1482,7 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
       </div>
 
       <div className="support">
-        <div className="support-title">Apostou · {mesRangeLabel_(aptFrom, aptTo)} · {canal === 'all' ? 'todos os canais' : canal} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{aptFetch.loading ? ' · carregando BQ…' : ''}{aptFetch.error ? ' · erro (usando janela global)' : ''}</div>
+        <div className="support-title">Apostou · {mesRangeLabel_(aptFrom, aptTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{aptFetch.loading ? ' · carregando BQ…' : ''}{aptFetch.error ? ' · erro (usando janela global)' : ''}</div>
         <table className="ch-table">
           {head}
           <tbody>
@@ -1486,7 +1495,7 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
       </div>
 
       <div className="support">
-        <div className="support-title">Demais Casas · {mesRangeLabel_(houseFrom, houseTo)} · {canal === 'all' ? 'todos os canais' : canal} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
+        <div className="support-title">Demais Casas · {mesRangeLabel_(houseFrom, houseTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
         <table className="ch-table">
           {head}
           <tbody>
