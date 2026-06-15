@@ -1123,7 +1123,7 @@ const MOCK_RETENCAO_FAIXA = (() => {
       out.push({ date, canal, faixa, qtdFtds: qtd, ftdTotal: qtd * tkt, depD0: d0,
         cntD1: Math.round(qtd * r1), valD1: d0 * r1 * 1.1,
         cntW1: Math.round(qtd * rw), valW1: d0 * rw * 1.15,
-        cntM0: Math.round(qtd * rm), valM0: d0 * rm * 1.2 });
+        cntM0: Math.round(qtd * rm), valM0: d0 * rm * 1.2, ggrM0: qtd * tkt * (0.25 + i * 0.03) });
     }));
   }
   return out;
@@ -1141,36 +1141,52 @@ function aggRetFaixaDaily_(rows, filter, faixa) {
   if (!rows || !rows.length) return { rows: [], totals: {} };
   const selCh = chSelector_(filter);
   const selFx = (fx) => faixa === 'all' || fx === faixa;
-  const keys = ['qtdFtds','ftdTotal','depD0','cntD1','valD1','cntW1','valW1','cntM0','valM0'];
+  const keys = ['qtdFtds','ftdTotal','depD0','cntD1','valD1','cntW1','valW1','cntM0','valM0','ggrM0'];
   const byDay = {}, tot = {}; keys.forEach(k => tot[k] = 0);
   rows.forEach(r => {
     if (!selCh(r.canal) || !selFx(r.faixa)) return;
     if (!byDay[r.date]) { byDay[r.date] = {}; keys.forEach(k => byDay[r.date][k] = 0); }
     keys.forEach(k => { byDay[r.date][k] += r[k] || 0; tot[k] += r[k] || 0; });
   });
-  const fin = (o, date) => ({
-    date, qtdFtds: o.qtdFtds, ftdTotal: o.ftdTotal,
-    ftdMedio: o.qtdFtds ? o.ftdTotal / o.qtdFtds : null,
-    d0: o.depD0, d1: o.valD1, w1: o.valW1, m0: o.valM0,
-    retD1: o.depD0 ? o.valD1 / o.depD0 : null,
-    retW1: o.depD0 ? o.valW1 / o.depD0 : null,
-    retM0: o.depD0 ? o.valM0 / o.depD0 : null,
-  });
+  const fin = (o, date) => {
+    const d0 = o.depD0 || 0;
+    const d1 = d0 + (o.valD1 || 0);  // $ ACUMULADOS incluindo o D0
+    const w1 = d0 + (o.valW1 || 0);  // W1 = D0 + dias 1–7
+    const m0 = d0 + (o.valM0 || 0);  // M0 = D0 + resto do mês do FTD
+    const q = o.qtdFtds || 0;
+    return {
+      date, qtdFtds: o.qtdFtds, ftdTotal: o.ftdTotal,
+      ftdMedio: o.qtdFtds ? o.ftdTotal / o.qtdFtds : null,
+      ggrM0: o.ggrM0,                // GGR (NGR) do mês do FTD — real (inclui golpe de 10/06)
+      d0, d1, w1, m0,
+      multD0: d0 ? d0 / d0 : null,   // base (D0 ÷ D0 = 1,00x)
+      multD1: d0 ? d1 / d0 : null,   // multiplicador = depósito acumulado ÷ D0
+      multW1: d0 ? w1 / d0 : null,
+      multM0: d0 ? m0 / d0 : null,
+      depMedD0: q ? d0 / q : null,   // depósito médio por FTD (acumulado incl. D0)
+      depMedD1: q ? d1 / q : null,
+      depMedW1: q ? w1 / q : null,
+      depMedM0: q ? m0 / q : null,
+    };
+  };
   const days = Object.keys(byDay).sort();
   return { rows: days.map(d => fin(byDay[d], d)), totals: fin(tot, 'Total') };
 }
 
-function RetFaixaTable({ data }) {
+function RetFaixaTable({ data, cac }) {
   const rows = data.rows || [], t = data.totals || {};
   const range = (key) => { const v = rows.map(r => r[key]).filter(x => x != null && !isNaN(x)); return v.length ? { min: Math.min(...v), max: Math.max(...v) } : { min: 0, max: 1 }; };
-  const rD1 = range('retD1'), rW1 = range('retW1'), rM0 = range('retM0');
+  const rD1 = range('multD1'), rW1 = range('multW1'), rM0 = range('multM0');
   const dm = (iso) => { if (!iso) return '—'; const p = iso.split('-'); return `${p[2]}/${p[1]}`; };
+  // ROAS GGR = GGR M0 ÷ investimento. Spend não separa por faixa → invest = CAC × Qtd FTDs (mesma base do Payback M0/CAC).
+  const roasGgr = (r) => (cac && r.qtdFtds && r.ggrM0 != null) ? r.ggrM0 / (cac * r.qtdFtds) : null;
+  const roasCell = (x) => (x == null || isNaN(x)) ? <td>—</td> : <td className={x >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(x)}</td>;
   return (
     <table className="ch-table">
       <thead>
         <tr>
-          <th>Data FTD</th><th>Qtd FTDs</th><th>Tkt Médio FTD</th>
-          <th>D0 $</th><th>D1 $</th><th>Ret. D1</th><th>W1 $</th><th>Ret. W1</th><th>M0 $</th><th>Ret. M0</th>
+          <th>Data FTD</th><th>Qtd FTDs</th><th>FTD $</th><th>Tkt Médio FTD</th>
+          <th>Mult. D0</th><th>Dep méd D0</th><th>Mult. D1</th><th>Dep méd D1</th><th>Mult. W1</th><th>Dep méd W1</th><th>M0 $</th><th>Mult. M0</th><th>Dep méd M0</th><th>ROAS GGR</th>
         </tr>
       </thead>
       <tbody>
@@ -1178,22 +1194,26 @@ function RetFaixaTable({ data }) {
           <tr key={i}>
             <td className="ch-name">{dm(r.date)}</td>
             <td>{fmtQty(r.qtdFtds)}</td>
+            <td>{fmtBRL(r.ftdTotal)}</td>
             <td>{fmtBRL(r.ftdMedio)}</td>
-            <td>{fmtBRL(r.d0)}</td>
-            <td>{fmtBRL(r.d1)}</td>
-            <td style={{ background: heatBg_(r.retD1, rD1.min, rD1.max) }}>{fmtPct(r.retD1, 1)}</td>
-            <td>{fmtBRL(r.w1)}</td>
-            <td style={{ background: heatBg_(r.retW1, rW1.min, rW1.max) }}>{fmtPct(r.retW1, 1)}</td>
+            <td>{fmtMultiple(r.multD0)}</td>
+            <td>{fmtBRL(r.depMedD0)}</td>
+            <td style={{ background: heatBg_(r.multD1, rD1.min, rD1.max) }}>{fmtMultiple(r.multD1)}</td>
+            <td>{fmtBRL(r.depMedD1)}</td>
+            <td style={{ background: heatBg_(r.multW1, rW1.min, rW1.max) }}>{fmtMultiple(r.multW1)}</td>
+            <td>{fmtBRL(r.depMedW1)}</td>
             <td>{fmtBRL(r.m0)}</td>
-            <td style={{ background: heatBg_(r.retM0, rM0.min, rM0.max) }}>{fmtPct(r.retM0, 1)}</td>
+            <td style={{ background: heatBg_(r.multM0, rM0.min, rM0.max) }}>{fmtMultiple(r.multM0)}</td>
+            <td>{fmtBRL(r.depMedM0)}</td>
+            {roasCell(roasGgr(r))}
           </tr>
         ))}
       </tbody>
       <tfoot>
         <tr>
-          <td>Total</td><td>{fmtQty(t.qtdFtds)}</td><td>{fmtBRL(t.ftdMedio)}</td>
-          <td>{fmtBRL(t.d0)}</td><td>{fmtBRL(t.d1)}</td><td>{fmtPct(t.retD1, 1)}</td>
-          <td>{fmtBRL(t.w1)}</td><td>{fmtPct(t.retW1, 1)}</td><td>{fmtBRL(t.m0)}</td><td>{fmtPct(t.retM0, 1)}</td>
+          <td>Total</td><td>{fmtQty(t.qtdFtds)}</td><td>{fmtBRL(t.ftdTotal)}</td><td>{fmtBRL(t.ftdMedio)}</td>
+          <td>{fmtMultiple(t.multD0)}</td><td>{fmtBRL(t.depMedD0)}</td><td>{fmtMultiple(t.multD1)}</td><td>{fmtBRL(t.depMedD1)}</td>
+          <td>{fmtMultiple(t.multW1)}</td><td>{fmtBRL(t.depMedW1)}</td><td>{fmtBRL(t.m0)}</td><td>{fmtMultiple(t.multM0)}</td><td>{fmtBRL(t.depMedM0)}</td>{roasCell(roasGgr(t))}
         </tr>
       </tfoot>
     </table>
@@ -1208,7 +1228,7 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
   let sScope = 0, qScope = 0;
   (channels || []).forEach(c => { if (c.spend != null) { sScope += c.spend; qScope += (c.ftdQty || 0); } });
   const cac = qScope > 0 ? sScope / qScope : null;
-  const m0Dep = (t.d0 || 0) + (t.m0 || 0);                              // depósito do mês M0 = D0 + resto do mês
+  const m0Dep = t.m0 || 0;                                             // M0 já é cumulativo incl. D0 (= D0 + resto do mês)
   const m0PerFtd = t.ftdTotal ? m0Dep / t.ftdTotal : null;             // multiplicador M0/FTD
   const m0PerPlayer = t.qtdFtds ? m0Dep / t.qtdFtds : null;            // M0 por jogador
   const paybackM0 = (cac && m0PerPlayer != null) ? m0PerPlayer / cac : null; // quantas vezes o CAC voltou em M0
@@ -1224,7 +1244,7 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
       <div className="tab-header">
         <div>
           <h1>Retenções por faixa de FTD</h1>
-          <div className="subtitle">Safra de FTD por dia, filtrável por faixa de valor do 1º depósito e por canal — retenção D1 / W1 / M0 (valor)</div>
+          <div className="subtitle">Safra de FTD por dia, filtrável por faixa de valor do 1º depósito e por canal — multiplicadores acumulados D1 / W1 / M0 + depósito médio por FTD + ROAS GGR</div>
         </div>
         <div className="slicer-group">
           <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Faixa FTD</label>
@@ -1239,10 +1259,243 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
       </div>
       <div className="support">
         <div className="support-title">Safra por Dia · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
-        <RetFaixaTable data={data} />
+        <RetFaixaTable data={data} cac={cac} />
         <div className="ch-note">
-          Cada linha = safra de FTD daquele dia, na faixa selecionada. <strong>Ret.</strong> = R$ depositado no período ÷ depósito D0.
-          <strong> D1</strong> = dia seguinte · <strong>W1</strong> = dias 1–7 · <strong>M0</strong> = resto do mês do FTD. Coorte = FTDs na janela de data.
+          Cada linha = safra de FTD daquele dia, na faixa selecionada. Depósitos <strong>acumulados incluindo o D0:</strong> D1 = D0+D1 · W1 = D0+(dias 1–7) · M0 = D0+resto do mês do FTD.
+          <strong> Mult.</strong> = depósito acumulado ÷ D0 (quantas vezes o depósito do 1º dia o jogador já depositou). <strong>Dep méd</strong> = depósito acumulado ÷ Qtd FTDs (R$ médio por jogador). Coorte = FTDs na janela de data.
+          <strong> ROAS GGR</strong> = GGR (NGR) do mês do FTD ÷ (CAC × Qtd FTDs) — invest não se separa por faixa, então usa o CAC do escopo. GGR é real (inclui perdas).
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
+
+// ============================================================
+// BENCHMARK ENTRE CASAS — Apostou vs concorrentes (Excel estático → benchmark.json)
+// Mesmas bases aditivas da query retencaoFaixa_: qtd, ftd($), d0($),
+// cd1/cw1/cm0 (contagens retidas) + vd1/vw1/vm0 ($ por janela, excl. D0).
+// FTD$$ = Σftd/Σqtd · D0$$ = Σd0/Σqtd · retX(qtd)=Σcdx/Σqtd · retX(val)=Σvdx/Σd0
+// ============================================================
+const BENCH_HOUSE_ORDER = ['lottu', 'betpontobet', 'donaldbet'];
+const MES_ABBR = ['', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const mesLabel_ = (m) => { if (!m) return '—'; const [y, mm] = String(m).split('-'); return `${MES_ABBR[+mm]}/${y.slice(2)}`; };
+const mesRangeLabel_ = (a, b) => (a && b) ? (a === b ? mesLabel_(a) : `${mesLabel_(a)}–${mesLabel_(b)}`) : '—';
+
+// Linhas colunares das casas -> {mes, canal, faixa, qtd, ftd, d0, cd1, vd1, cw1, vw1, cm0, vm0}
+function benchHouseRows_(bench, hkey) {
+  if (!bench || !bench.houses || !bench.houses[hkey]) return [];
+  const { meses, canais, faixas } = bench;
+  return bench.houses[hkey].rows.map(r => ({
+    mes: meses[r[0]], canal: canais[r[1]], faixa: faixas[r[2]],
+    qtd: r[3], ftd: r[4], d0: r[5], cd1: r[6], vd1: r[7], cw1: r[8], vw1: r[9], cm0: r[10], vm0: r[11],
+  }));
+}
+// retencaoFaixa (Apostou, diária) -> mesmo shape, colapsando o dia em mês.
+function benchApostouRows_(retencaoFaixa) {
+  return (retencaoFaixa || []).map(r => ({
+    mes: String(r.date).slice(0, 7), canal: r.canal, faixa: r.faixa,
+    qtd: r.qtdFtds || 0, ftd: r.ftdTotal || 0, d0: r.depD0 || 0,
+    cd1: r.cntD1 || 0, vd1: r.valD1 || 0, cw1: r.cntW1 || 0, vw1: r.valW1 || 0, cm0: r.cntM0 || 0, vm0: r.valM0 || 0,
+  }));
+}
+function aggBench_(rows, sel) {
+  const out = { qtd: 0, ftd: 0, d0: 0, cd1: 0, vd1: 0, cw1: 0, vw1: 0, cm0: 0, vm0: 0 };
+  (rows || []).forEach(r => {
+    if (sel.canal && sel.canal !== 'all' && r.canal !== sel.canal) return;
+    if (sel.faixa && sel.faixa !== 'all' && r.faixa !== sel.faixa) return;
+    if (sel.mesFrom && r.mes < sel.mesFrom) return;
+    if (sel.mesTo && r.mes > sel.mesTo) return;
+    out.qtd += r.qtd; out.ftd += r.ftd; out.d0 += r.d0;
+    out.cd1 += r.cd1; out.vd1 += r.vd1; out.cw1 += r.cw1; out.vw1 += r.vw1; out.cm0 += r.cm0; out.vm0 += r.vm0;
+  });
+  return out;
+}
+// Bases -> 5 métricas do template. mode 'qtd'|'val' afeta só as colunas de retenção.
+function benchMetrics_(a, mode) {
+  const ret = (cnt, val) => mode === 'val' ? (a.d0 ? val / a.d0 : null) : (a.qtd ? cnt / a.qtd : null);
+  const multF = (acc) => a.ftd ? acc / a.ftd : null;   // depósito acumulado (incl. D0) ÷ valor do FTD
+  return {
+    qtd: a.qtd,
+    ftdMedio: a.qtd ? a.ftd / a.qtd : null,   // FTD $$ = ticket médio do 1º depósito
+    d0Medio: a.qtd ? a.d0 / a.qtd : null,     // Dep D0 Med = Σ D0 ÷ qtd FTDs
+    multD0F: multF(a.d0),                      // D0 ÷ FTD
+    multD1F: multF(a.d0 + a.vd1),              // (D0 + dia 1) ÷ FTD — acumulado
+    multW1F: multF(a.d0 + a.vw1),              // (D0 + dias 1–7) ÷ FTD
+    multM0F: multF(a.d0 + a.vm0),              // (D0 + resto do mês do FTD) ÷ FTD
+    retD1: ret(a.cd1, a.vd1),
+    retW1: ret(a.cw1, a.vw1),
+    retM0: ret(a.cm0, a.vm0),
+  };
+}
+function monthsInRows_(rows) { const s = {}; (rows || []).forEach(r => { s[r.mes] = 1; }); return Object.keys(s).sort(); }
+
+// Tint da célula da casa vs Apostou (maior = melhor em todas as 5 métricas).
+function benchCmpBg_(h, a) {
+  if (h == null || a == null || isNaN(h) || isNaN(a)) return undefined;
+  if (h > a * 1.0001) return 'rgba(34,197,94,0.14)';   // melhor que Apostou
+  if (h < a * 0.9999) return 'rgba(239,68,68,0.13)';   // pior
+  return undefined;
+}
+
+const BENCH_SEL_STYLE = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' };
+// Top-level (não inline na BenchmarkTab) p/ não remontar o <select> a cada render.
+function BenchMesSelect({ value, onChange, options }) {
+  return (
+    <select value={value || ''} onChange={e => onChange(e.target.value)} style={BENCH_SEL_STYLE}>
+      {options.map((m, i) => <option key={i} value={m}>{mesLabel_(m)}</option>)}
+    </select>
+  );
+}
+
+function BenchmarkTab({ retencaoFaixa, benchmark }) {
+  const aptRows = React.useMemo(() => benchApostouRows_(retencaoFaixa), [retencaoFaixa]);
+  const houseRowsMap = React.useMemo(() => {
+    const m = {}; BENCH_HOUSE_ORDER.forEach(h => { m[h] = benchHouseRows_(benchmark, h); }); return m;
+  }, [benchmark]);
+
+  const aptMonths = monthsInRows_(aptRows);
+  const houseMonths = (benchmark && benchmark.meses) || [];
+  const canalOptions = (benchmark && benchmark.canais) || [];
+  const faixaOptions = (benchmark && benchmark.faixas) || FAIXA_LIST;
+
+  const [canal, setCanal] = React.useState('all');
+  const [faixa, setFaixa] = React.useState('all');
+  const [mode, setMode] = React.useState('qtd');     // 'qtd' (% redepositou) | 'val' (multiplicador $)
+  const [aptFrom, setAptFrom] = React.useState(null);
+  const [aptTo, setAptTo] = React.useState(null);
+  const [houseFrom, setHouseFrom] = React.useState(null);
+  const [houseTo, setHouseTo] = React.useState(null);
+
+  // defaults = janela cheia de cada lado, setado quando os dados chegam
+  const aptKey = aptMonths.join(',');
+  const houseKey = houseMonths.join(',');
+  React.useEffect(() => { if (aptMonths.length) { setAptFrom(aptMonths[0]); setAptTo(aptMonths[aptMonths.length - 1]); } }, [aptKey]);
+  React.useEffect(() => { if (houseMonths.length) { setHouseFrom(houseMonths[0]); setHouseTo(houseMonths[houseMonths.length - 1]); } }, [houseKey]);
+
+  const apt = benchMetrics_(aggBench_(aptRows, { canal, faixa, mesFrom: aptFrom, mesTo: aptTo }), mode);
+  const houses = BENCH_HOUSE_ORDER.map(h => ({
+    key: h,
+    label: (benchmark && benchmark.houses && benchmark.houses[h] && benchmark.houses[h].label) || h,
+    m: benchMetrics_(aggBench_(houseRowsMap[h], { canal, faixa, mesFrom: houseFrom, mesTo: houseTo }), mode),
+  }));
+
+  const fmtRet = (x) => mode === 'qtd' ? fmtPct(x, 1) : fmtMultiple(x);
+  const retHdr = mode === 'qtd' ? 'Ret %' : 'Ret ×';
+  const selStyle = BENCH_SEL_STYLE;
+  const lblStyle = { fontSize: '11px', color: 'var(--text-muted)' };
+  // Células de uma casa. apt=null na linha da Apostou (sem tint); senão = métricas da Apostou p/ comparar.
+  const benchRowCells = (m, apt) => {
+    const bg = (v, k) => apt ? { background: benchCmpBg_(v, apt[k]) } : undefined;
+    return [
+      <td key="q">{fmtQty(m.qtd)}</td>,
+      <td key="ftd" style={bg(m.ftdMedio, 'ftdMedio')}>{fmtBRL(m.ftdMedio)}</td>,
+      <td key="d0" style={bg(m.d0Medio, 'd0Medio')}>{fmtBRL(m.d0Medio)}</td>,
+      <td key="d0f" style={bg(m.multD0F, 'multD0F')}>{fmtMultiple(m.multD0F)}</td>,
+      <td key="d1f" style={bg(m.multD1F, 'multD1F')}>{fmtMultiple(m.multD1F)}</td>,
+      <td key="w1f" style={bg(m.multW1F, 'multW1F')}>{fmtMultiple(m.multW1F)}</td>,
+      <td key="m0f" style={bg(m.multM0F, 'multM0F')}>{fmtMultiple(m.multM0F)}</td>,
+      <td key="r1" style={bg(m.retD1, 'retD1')}>{fmtRet(m.retD1)}</td>,
+      <td key="rw1" style={bg(m.retW1, 'retW1')}>{fmtRet(m.retW1)}</td>,
+      <td key="rm0" style={bg(m.retM0, 'retM0')}>{fmtRet(m.retM0)}</td>,
+    ];
+  };
+  const head = (
+    <thead><tr>
+      <th>Casa</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
+      <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult M0/FTD</th>
+      <th>{`D1 ${retHdr}`}</th><th>{`W1 ${retHdr}`}</th><th>{`M0 ${retHdr}`}</th>
+    </tr></thead>
+  );
+
+  if (!benchmark) {
+    return (
+      <React.Fragment>
+        <div className="tab-header"><div><h1>Benchmark entre casas</h1>
+          <div className="subtitle">Apostou vs concorrentes — carregando <code>benchmark.json</code>…</div></div></div>
+      </React.Fragment>
+    );
+  }
+
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Benchmark entre casas</h1>
+          <div className="subtitle">Apostou vs Lottu · Bet.Bet · Donald — ticket de FTD, depósito D0 e retenção D1/W1/M0 por faixa e canal</div>
+        </div>
+      </div>
+
+      <div className="slicer" style={{ flexWrap: 'wrap', rowGap: '8px' }}>
+        <div className="slicer-group">
+          <label style={lblStyle}>Canal</label>
+          <select value={canal} onChange={e => setCanal(e.target.value)} style={selStyle}>
+            <option value="all">Todos</option>
+            {canalOptions.map((c, i) => <option key={i} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="slicer-group">
+          <label style={lblStyle}>Faixa FTD</label>
+          <select value={faixa} onChange={e => setFaixa(e.target.value)} style={selStyle}>
+            <option value="all">Todas</option>
+            {faixaOptions.map((f, i) => <option key={i} value={f}>{fxLabel_(f)}</option>)}
+          </select>
+        </div>
+        <div className="slicer-group">
+          <label style={lblStyle}>Retenção</label>
+          <div className="slicer-presets">
+            <button className={`preset-btn ${mode === 'val' ? 'active' : ''}`} onClick={() => setMode('val')} title="Retenção por VALOR: $ depositado na janela ÷ depósito do D0 (multiplicador)">Valor</button>
+            <button className={`preset-btn ${mode === 'qtd' ? 'active' : ''}`} onClick={() => setMode('qtd')} title="Retenção por QUANTIDADE: % dos FTDs que voltaram a depositar na janela">Qtd</button>
+          </div>
+        </div>
+        <div className="slicer-divider" />
+        <div className="slicer-group">
+          <label style={lblStyle}>Data Apostou</label>
+          <BenchMesSelect value={aptFrom} onChange={setAptFrom} options={aptMonths} />
+          <span className="slicer-arrow">→</span>
+          <BenchMesSelect value={aptTo} onChange={setAptTo} options={aptMonths} />
+        </div>
+        <div className="slicer-group">
+          <label style={lblStyle}>Data Demais Casas</label>
+          <BenchMesSelect value={houseFrom} onChange={setHouseFrom} options={houseMonths} />
+          <span className="slicer-arrow">→</span>
+          <BenchMesSelect value={houseTo} onChange={setHouseTo} options={houseMonths} />
+        </div>
+      </div>
+
+      <div className="support">
+        <div className="support-title">Apostou · {mesRangeLabel_(aptFrom, aptTo)} · {canal === 'all' ? 'todos os canais' : canal} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
+        <table className="ch-table">
+          {head}
+          <tbody>
+            <tr>
+              <td className="ch-name">Apostou</td>
+              {benchRowCells(apt, null)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="support">
+        <div className="support-title">Demais Casas · {mesRangeLabel_(houseFrom, houseTo)} · {canal === 'all' ? 'todos os canais' : canal} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
+        <table className="ch-table">
+          {head}
+          <tbody>
+            {houses.map((h) => (
+              <tr key={h.key}>
+                <td className="ch-name">{h.label}</td>
+                {benchRowCells(h.m, apt)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="ch-note">
+          <strong>Qtd FTD</strong> = nº de 1ºs depósitos · <strong>FTD $$</strong> = ticket médio do FTD (Σ FTD ÷ qtd) · <strong>Dep D0 Med</strong> = depósito médio no D0 (Σ D0 ÷ qtd).
+          <strong> Mult X/FTD</strong> = depósito acumulado (incluindo o D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+resto do mês)/FTD.
+          <strong> D1/W1/M0 Ret</strong> = retenção acumulada vs D0 (D1 = dia seguinte · W1 = dias 1–7 · M0 = resto do mês do FTD).
+          No modo <strong>Valor</strong> = $ depositado na janela ÷ depósito do D0 (exclui o D0); no modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar.
+          Células das casas <span style={{ background: 'rgba(34,197,94,0.18)', padding: '0 4px', borderRadius: '3px' }}>verdes</span> = melhor que a Apostou, <span style={{ background: 'rgba(239,68,68,0.16)', padding: '0 4px', borderRadius: '3px' }}>vermelhas</span> = pior.
+          Apostou via BigQuery (segue a janela global no topo); demais casas via Excel estático (jan–jun/26).
+          <strong> ⚠ Pra comparar justo, alinhe os dois filtros de mês:</strong> o mês corrente ainda está imaturo (M0 = "resto do mês" trunca coortes recentes), então Apostou no mês atual fica subestimada vs casas com período maturado.
         </div>
       </div>
     </React.Fragment>
@@ -1257,6 +1510,7 @@ const TABS = [
   { id: 'ggr', label: 'GGR', component: TabGgr },
   { id: 'depositos', label: 'Depósitos', component: TabDepositos },
   { id: 'apostas', label: 'Turnover', component: TabApostas },
+  { id: 'benchmark', label: 'Benchmark', component: BenchmarkTab },
 ];
 
 // ============================================================
@@ -1528,6 +1782,7 @@ function App() {
     rolloverMatrix: MOCK_ROLLOVER_MATRIX,
     bp: null,
     isLive: false,
+    benchmark: null,   // benchmark.json (casas concorrentes, Excel estático)
   });
 
   const loadData = React.useCallback((opts = {}) => {
@@ -1573,6 +1828,14 @@ function App() {
   }, [appliedRange.from, appliedRange.to]); // canal/scope NÃO disparam fetch — filtro é client-side
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Benchmark das casas concorrentes — arquivo estático servido ao lado do index.html.
+  useEffect(() => {
+    fetch('benchmark.json')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (j) setState(prev => ({ ...prev, benchmark: j })); })
+      .catch(() => {});
+  }, []);
 
   // Auto-roll do calendário: se um preset estiver ativo (MTD/7d/30d/mês passado),
   // re-avalia a data quando a aba volta ao foco e periodicamente — assim o MTD
@@ -1752,6 +2015,7 @@ function App() {
           ggrPayback={state.ggrPayback}
           dailyCohort={selectDailyCohort_(state.dailyCohort, chFilter)}
           retencaoFaixa={state.retencaoFaixa}
+          benchmark={state.benchmark}
           chFilter={chFilter}
           depM0Channels={fDepM0Channels}
           rolloverMatrix={fRolloverMatrix}
