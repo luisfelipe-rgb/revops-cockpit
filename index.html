@@ -823,7 +823,7 @@ function DepM0Table({ channels }) {
 //   M3+: pool de safras antigas, mês ref vs mês anterior
 // ============================================================
 
-function RetentionTable({ channels }) {
+function RetentionTable({ channels, totalM3plus }) {
   // Total exato: soma numeradores/denominadores das linhas exibidas
   const tot = channels.reduce((a, c) => {
     const nd = c.nd || {};
@@ -832,6 +832,9 @@ function RetentionTable({ channels }) {
     return a;
   }, { n1: 0, d1: 0, n2: 0, d2: 0, n3: 0, d3: 0, m0: 0 });
   const rate = (n, d) => (d > 0 ? n / d : null);
+  // M3+ do Total = valor do hero (Total da Casa usa a fórmula residual da FAROL; nas linhas
+  // por canal o M3+ é coorte e NÃO soma pro Total — o M3+ não decompõe por canal, ver FAROL).
+  const m3Total = (totalM3plus !== undefined && totalM3plus !== null) ? totalM3plus : rate(tot.n3, tot.d3);
 
   return (
     <table className="ch-table">
@@ -861,7 +864,7 @@ function RetentionTable({ channels }) {
           <td>{fmtBRL(tot.m0)}</td>
           <td>{fmtPct(rate(tot.n1, tot.d1))}</td>
           <td>{fmtPct(rate(tot.n2, tot.d2))}</td>
-          <td>{fmtPct(rate(tot.n3, tot.d3))}</td>
+          <td>{fmtPct(m3Total)}</td>
         </tr>
       </tfoot>
     </table>
@@ -913,7 +916,7 @@ function TabRetencao({ M, retentionChannels }) {
       {retentionChannels && retentionChannels.length > 0 && (
         <div className="support">
           <div className="support-title">Retenção por Canal</div>
-          <RetentionTable channels={retentionChannels} />
+          <RetentionTable channels={retentionChannels} totalM3plus={M.retM3plus && M.retM3plus.act} />
         </div>
       )}
     </React.Fragment>
