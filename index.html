@@ -1694,6 +1694,10 @@ function applyBpLive_(out, filter, bp) {
   // Sem BP per-canal: zera o farol pra não mostrar BP de Total da Casa no escopo errado.
   out.ggr      = { ...out.ggr, bp: null, pctBp: null };
   out.depTotal = { ...out.depTotal, bp: null, pctBp: null };
+  // Retenção: BP do plano é só Total da Casa (não há plano por canal) → farol off em canal/growth.
+  out.retM0M1   = { ...out.retM0M1, bp: null, pctBp: null };
+  out.retM1M2   = { ...out.retM1M2, bp: null, pctBp: null };
+  out.retM3plus = { ...out.retM3plus, bp: null, pctBp: null };
   return out;
 }
 
