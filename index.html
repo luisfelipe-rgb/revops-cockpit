@@ -575,7 +575,7 @@ function HBarList({ items, valueFmt = 'brl' }) {
 //   ROAS = FTD R$ / Investimento · CAC = Investimento / FTD qtd · Ticket = FTD R$ / FTD qtd
 // ============================================================
 
-function ChannelTable({ channels }) {
+function ChannelTable({ channels, bp }) {
   // Totais pra linha de rodapé
   const tot = channels.reduce((a, c) => ({
     spend: a.spend + (c.spend || 0),
@@ -590,9 +590,23 @@ function ChannelTable({ channels }) {
   const cac = (c) => (c.spend != null && c.ftdQty > 0 ? c.spend / c.ftdQty : null);
   const ticket = (c) => (c.ftdQty > 0 ? c.ftdAmount / c.ftdQty : null);
 
-  const roasCell = (r) => {
-    if (r == null) return <td>—</td>;
-    return <td className={r >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(r)}</td>;
+  // BP por canal (do plano): ROAS FTD = ftdAmount/invest · ROAS D0 = depD0/invest · CAC = invest/ftd.
+  const byCh = (bp && bp.byChannel) || {};
+  const bpRoasFtd = (ch) => { const b = byCh[ch]; return (b && b.invest > 0) ? b.ftdAmount / b.invest : null; };
+  const bpRoasD0  = (ch) => { const b = byCh[ch]; return (b && b.invest > 0 && b.depD0 != null) ? b.depD0 / b.invest : null; };
+  const bpCac     = (ch) => { const b = byCh[ch]; return (b && b.ftd > 0) ? b.invest / b.ftd : null; };
+  // BP do Total = soma dos canais visíveis (acompanha o filtro de canal).
+  const bpTot = channels.reduce((a, c) => { const b = byCh[c.channel]; if (b) { a.invest += b.invest || 0; a.ftdAmount += b.ftdAmount || 0; a.depD0 += b.depD0 || 0; a.ftd += b.ftd || 0; } return a; }, { invest: 0, ftdAmount: 0, depD0: 0, ftd: 0 });
+
+  // Célula colorida vs BP: ROAS (maior=melhor) verde se act≥BP; CAC (menor=melhor) verde se act≤BP.
+  // Sem BP do canal → sem cor. Mantém o "—" quando não há valor.
+  const cmpCell = (act, bpv, fmt, higherBetter) => {
+    if (act == null || isNaN(act)) return <td>—</td>;
+    let cls = '';
+    if (bpv != null && isFinite(bpv) && bpv > 0) {
+      cls = (higherBetter ? act >= bpv : act <= bpv) ? 'ch-roas-pos' : 'ch-roas-neg';
+    }
+    return <td className={cls}>{fmt === 'brl' ? fmtBRL(act) : fmtMultiple(act)}</td>;
   };
 
   return (
@@ -616,9 +630,9 @@ function ChannelTable({ channels }) {
             <td>{fmtBRL(c.spend)}</td>
             <td>{fmtBRL(c.ftdAmount)}</td>
             <td>{fmtQty(c.ftdQty)}</td>
-            {roasCell(roas(c))}
-            {roasCell(roasD0(c))}
-            <td>{fmtBRL(cac(c))}</td>
+            {cmpCell(roas(c), bpRoasFtd(c.channel), 'multiple', true)}
+            {cmpCell(roasD0(c), bpRoasD0(c.channel), 'multiple', true)}
+            {cmpCell(cac(c), bpCac(c.channel), 'brl', false)}
             <td>{fmtBRL(ticket(c))}</td>
           </tr>
         ))}
@@ -629,9 +643,9 @@ function ChannelTable({ channels }) {
           <td>{fmtBRL(tot.spend)}</td>
           <td>{fmtBRL(tot.ftdAmount)}</td>
           <td>{fmtQty(tot.ftdQty)}</td>
-          {roasCell(tot.spend > 0 ? tot.ftdAmount / tot.spend : null)}
-          {roasCell(tot.spend > 0 ? tot.depD0 / tot.spend : null)}
-          <td>{fmtBRL(tot.ftdQty > 0 ? tot.spend / tot.ftdQty : null)}</td>
+          {cmpCell(tot.spend > 0 ? tot.ftdAmount / tot.spend : null, bpTot.invest > 0 ? bpTot.ftdAmount / bpTot.invest : null, 'multiple', true)}
+          {cmpCell(tot.spend > 0 ? tot.depD0 / tot.spend : null, bpTot.invest > 0 ? bpTot.depD0 / bpTot.invest : null, 'multiple', true)}
+          {cmpCell(tot.ftdQty > 0 ? tot.spend / tot.ftdQty : null, bpTot.ftd > 0 ? bpTot.invest / bpTot.ftd : null, 'brl', false)}
           <td>{fmtBRL(tot.ftdQty > 0 ? tot.ftdAmount / tot.ftdQty : null)}</td>
         </tr>
       </tfoot>
@@ -858,7 +872,7 @@ function RetentionTable({ channels }) {
 // TABS — 3 KPIs hero + viz de apoio
 // ============================================================
 
-function TabAquisicao({ M, channels }) {
+function TabAquisicao({ M, channels, bp }) {
   return (
     <React.Fragment>
       <div className="tab-header">
@@ -875,7 +889,7 @@ function TabAquisicao({ M, channels }) {
       {channels && channels.length > 0 && (
         <div className="support">
           <div className="support-title">Análise por Canal</div>
-          <ChannelTable channels={channels} />
+          <ChannelTable channels={channels} bp={bp} />
         </div>
       )}
     </React.Fragment>
@@ -1983,6 +1997,7 @@ function App() {
         <Tab
           M={displayM}
           channels={fChannels}
+          bp={state.bp}
           retentionChannels={fRetentionChannels}
           ggrChannels={fGgrChannels}
           ggrPayback={state.ggrPayback}
