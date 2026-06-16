@@ -512,8 +512,8 @@ const fmtVal = (n, fmt) => {
 // HERO CARD
 // ============================================================
 
-// BP/farol PAUSADO até a fonte do sheet ficar limpa — esconde o "vs BP" em todos os cards. Religar quando o BP voltar.
-const BP_FAROL_ON = false;
+// Farol LIGADO — o backend (Code.gs) manda payload.bp embutido (BP_DATA). ACT negativo ainda esconde.
+const BP_FAROL_ON = true;
 
 function Hero({ metric }) {
   // Farol off enquanto BP pausado; ACT negativo (dado corrompido) também esconde.
@@ -1703,66 +1703,6 @@ function applyBpLive_(out, filter, bp) {
   return out;
 }
 
-// ===================== TEMP — SIMULAÇÃO DE BP NO CLIENTE =====================
-// Preview do farol ANTES do deploy do backend. Quando o Code.gs novo estiver no ar,
-// payload.bp passa a existir e este bloco é ignorado. REMOVER depois do deploy.
-const BP_SIM_ENABLED = false; // BP pausado até a fonte do sheet ficar limpa — farol fica off até lá
-const BP_SIM_MONTHLY = {
-  '2026-06': {
-    house:  { invest:500000, ftdAmount:135000, ftd:3766, totDep:940000, m0tt:1128000, ggr:168046, ftdAmountTt:240000, ftdTt:6485, depM0:765000 },
-    growth: {
-      'Google_ads':   { invest:174600, ftdAmount:49308, depM0:272376 },
-      'Meta_ads':     { invest:243450, ftdAmount:69171, depM0:377124.67 },
-      'TikTok_ads':   { invest:123900, ftdAmount:28950, depM0:170362.50 },
-      'Kwai_ads':     { invest:29250,  ftdAmount:7238,  depM0:40218.75 },
-      'Programatica': { invest:11580,  ftdAmount:5211,  depM0:28660.50 },
-      'Streamer Influenciadores_ads': { invest:17370, ftdAmount:5320, depM0:29257.59 },
-      'Mobile_ads':   { invest:0, ftdAmount:0, depM0:0 }
-    }
-  }
-};
-function bpSimCanon_(raw) {
-  const s = String(raw || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  if (!s) return 'Orgânico (sem atribuição)';
-  if (/meta|facebook|instagram/.test(s)) return 'Meta';
-  if (/google|youtube/.test(s)) return 'Google';
-  if (/tiktok/.test(s)) return 'TikTok';
-  if (/kwai/.test(s)) return 'Kwai';
-  if (/program/.test(s)) return 'Programática';
-  if (/social|influencer/.test(s)) return 'Social Media';
-  if (/afili/.test(s)) return 'Afiliados';
-  return 'Outros';
-}
-function bpSimBuild_(from, to) {
-  const houseAcc = {}, rawAcc = {};
-  const add = (a, s, f) => { for (const k in s) a[k] = (a[k] || 0) + s[k] * f; };
-  let cur = new Date(from + 'T00:00:00'), end = new Date(to + 'T00:00:00'), guard = 0;
-  while (cur <= end && guard < 800) { guard++;
-    const mk = cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0');
-    const dim = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
-    const mm = BP_SIM_MONTHLY[mk];
-    if (mm) { add(houseAcc, mm.house, 1 / dim);
-      for (const raw in mm.growth) { if (!rawAcc[raw]) rawAcc[raw] = {}; add(rawAcc[raw], mm.growth[raw], 1 / dim); } }
-    cur.setDate(cur.getDate() + 1);
-  }
-  const byChannel = {}, growthAgg = {}, allAgg = {};
-  for (const raw in rawAcc) { const c = bpSimCanon_(raw);
-    if (!byChannel[c]) byChannel[c] = {}; add(byChannel[c], rawAcc[raw], 1); add(allAgg, rawAcc[raw], 1);
-    if (isGrowthCh_(c)) add(growthAgg, rawAcc[raw], 1); }
-  return { house: houseAcc, allAgg: allAgg, growthAgg: growthAgg, byChannel: byChannel };
-}
-function bpSimApply_(payload) {
-  if (!BP_SIM_ENABLED || !payload || payload.bp || !payload.metrics || !payload.meta) return (payload && payload.bp) || null;
-  const bp = bpSimBuild_(payload.meta.from, payload.meta.to);
-  const h = bp.house, g = bp.allAgg, gr = bp.growthAgg, M = payload.metrics;
-  const setb = (m, v) => { if (!m) return; m.bp = (v && isFinite(v)) ? v : null; m.pctBp = (m.bp && m.act != null) ? m.act / m.bp : null; };
-  setb(M.invest, g.invest); setb(M.ftdAmount, h.ftdAmountTt);
-  setb(M.roasFtd, (h.ftdAmountTt && g.invest) ? h.ftdAmountTt / g.invest : null);
-  setb(M.ggr, h.ggr); setb(M.depM0Total, h.m0tt); setb(M.depM0Growth, gr.depM0); // depTotal (bruto) sem BP
-  return bp;
-}
-// =================== FIM TEMP — SIMULAÇÃO DE BP ===================
-
 // Seleciona a série da safra diária conforme o filtro (novo shape {all,growth,byChannel} ou mock {totals,rows}).
 function selectDailyCohort_(dc, filter) {
   if (!dc) return null;
@@ -1830,7 +1770,6 @@ function App() {
       })
       .then(payload => {
         if (payload.error) throw new Error(payload.error);
-        const simBp = bpSimApply_(payload); // TEMP: preenche bp/pctBp se o backend ainda não manda
         setState(prev => ({
           ...prev,
           loading: false,
@@ -1850,7 +1789,7 @@ function App() {
           componentsByChannel: payload.componentsByChannel || null,
           depM0Channels: payload.depM0Channels,
           rolloverMatrix: payload.rolloverMatrix,
-          bp: payload.bp || simBp || null,
+          bp: payload.bp || null,
           isLive: true,
         }));
       })
