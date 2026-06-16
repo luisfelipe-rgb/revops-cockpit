@@ -1219,7 +1219,7 @@ function RetFaixaTable({ data, cac }) {
   );
 }
 
-function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
+function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp }) {
   const [faixa, setFaixa] = React.useState('all');
   const [mode, setMode] = React.useState('qtd');   // 'qtd' (% redepositou) | 'val' (% do depósito sobre o D0)
   const data = aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode);
@@ -1229,9 +1229,19 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
   (channels || []).forEach(c => { if (c.spend != null) { sScope += c.spend; qScope += (c.ftdQty || 0); } });
   const cac = qScope > 0 ? sScope / qScope : null;
   const paybackM0 = (cac && t.m0PerPlayer != null) ? t.m0PerPlayer / cac : null; // quantas vezes o CAC voltou em M0
+  // BP do escopo (Total/Growth/canal). Só faz sentido p/ "Todas as faixas" — o plano não tem meta
+  // por faixa de FTD. M0/FTD do plano = depM0÷ftdAmount · FTD médio do plano = ftdAmount÷ftd.
+  const bpSel = !bp ? null
+    : (chFilter && chFilter.channel) ? (bp.byChannel && bp.byChannel[chFilter.channel])
+    : (chFilter && chFilter.scope === 'growth') ? bp.growthAgg
+    : bp.allAgg;
+  const showBp = faixa === 'all' && bpSel;
+  const bpMultM0F  = (showBp && bpSel.ftdAmount > 0) ? bpSel.depM0 / bpSel.ftdAmount : null;
+  const bpFtdMedio = (showBp && bpSel.ftd > 0) ? bpSel.ftdAmount / bpSel.ftd : null;
+  const pb = (act, bpv) => (bpv && act != null) ? act / bpv : null;
   const heroes = [
-    { label: 'M0 / FTD', act: t.multM0F, m1: null, pctBp: null, fmt: 'multiple' },      // (D0+M0) ÷ FTD
-    { label: 'FTD médio do período', act: t.ftdMedio, m1: null, pctBp: null, fmt: 'brl' },
+    { label: 'M0 / FTD', act: t.multM0F, m1: null, bp: bpMultM0F, pctBp: pb(t.multM0F, bpMultM0F), fmt: 'multiple' },      // (D0+M0) ÷ FTD
+    { label: 'FTD médio do período', act: t.ftdMedio, m1: null, bp: bpFtdMedio, pctBp: pb(t.ftdMedio, bpFtdMedio), fmt: 'brl' },
     { label: 'Payback M0 / CAC', act: paybackM0, m1: null, pctBp: null, fmt: 'multiple' },
   ];
   const chLabel = (chFilter && chFilter.channel) ? chFilter.channel : (chFilter && chFilter.scope === 'growth' ? 'Canais Growth' : 'Total Casa');
