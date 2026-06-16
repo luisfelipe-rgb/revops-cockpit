@@ -1321,25 +1321,27 @@ function benchMetrics_(a, mode) {
 
 const BENCH_SEL_STYLE = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' };
 
-function BenchmarkTab({ retencaoFaixa, benchmark }) {
-  // Apostou puxa o PERÍODO PRÓPRIO (jan–jun, = span das casas) via modo leve only=retfaixa,
-  // independente do slicer global. Fallback no prop retencaoFaixa enquanto carrega / em mock.
+// View genérica do Benchmark — parametrizada por houseOrder + sameday (p/ reusar na aba Same-day).
+function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, subtitle }) {
+  // Apostou puxa o PERÍODO PRÓPRIO (jan–jun, = span das casas) via modo leve only=retfaixa
+  // (sameday=1 quando coorte same-day), independente do slicer global. Fallback no prop só no modo normal.
   const [aptFetch, setAptFetch] = React.useState({ rows: null, loading: false, error: null });
   React.useEffect(() => {
     if (!benchmark || !ENDPOINT_URL) return;
     const fullFrom = benchmark.dateMin;   // = span exato das casas (diário)
     const fullTo = benchmark.dateMax;
     setAptFetch(s => ({ ...s, loading: true, error: null }));
-    fetch(`${ENDPOINT_URL}?key=${ACCESS_TOKEN}&from=${fullFrom}&to=${fullTo}&only=retfaixa`)
+    fetch(`${ENDPOINT_URL}?key=${ACCESS_TOKEN}&from=${fullFrom}&to=${fullTo}&only=retfaixa${sameday ? '&sameday=1' : ''}`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(j => { if (j.error) throw new Error(j.error); setAptFetch({ rows: j.retencaoFaixa || [], loading: false, error: null }); })
       .catch(e => setAptFetch({ rows: null, loading: false, error: String(e.message || e) }));
-  }, [benchmark]);
+  }, [benchmark, sameday]);
 
-  const aptSource = (aptFetch.rows && aptFetch.rows.length) ? aptFetch.rows : retencaoFaixa;
+  // No sameday não cai no fallback global (que é coorte cheia) — espera o fetch.
+  const aptSource = (aptFetch.rows && aptFetch.rows.length) ? aptFetch.rows : (sameday ? [] : retencaoFaixa);
   const aptRows = React.useMemo(() => benchApostouRows_(aptSource), [aptSource]);
   const houseRowsMap = React.useMemo(() => {
-    const m = {}; BENCH_HOUSE_ORDER.forEach(h => { m[h] = benchHouseRows_(benchmark, h); }); return m;
+    const m = {}; houseOrder.forEach(h => { m[h] = benchHouseRows_(benchmark, h); }); return m;
   }, [benchmark]);
 
   const aptBounds = React.useMemo(() => dateBounds_(aptRows), [aptRows]);
@@ -1362,13 +1364,15 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
   React.useEffect(() => { if (houseMin && houseMax) { setHouseFrom(houseMin); setHouseTo(houseMax); } }, [houseMin, houseMax]);
 
   const apt = benchMetrics_(aggBench_(aptRows, { canal, scope, faixa, from: aptFrom, to: aptTo }), mode);
-  const houses = BENCH_HOUSE_ORDER.map(h => ({
+  const houses = houseOrder.map(h => ({
     key: h,
     label: (benchmark && benchmark.houses && benchmark.houses[h] && benchmark.houses[h].label) || h,
     m: benchMetrics_(aggBench_(houseRowsMap[h], { canal, scope, faixa, from: houseFrom, to: houseTo }), mode),
   }));
   // Rótulo do escopo de canal p/ os títulos das tabelas
   const canalLabel = canal !== 'all' ? canal : (scope === 'growth' ? 'Canais Growth' : 'todos os canais');
+  // Título da 2ª tabela: 1 casa só = o nome dela; várias = "Demais Casas"
+  const housesLabel = houseOrder.length === 1 ? (houses[0] && houses[0].label || 'Casa') : 'Demais Casas';
 
   const fmtRet = (x) => fmtPct(x, 1);   // sempre % (Valor pode passar de 100%); o toggle Qtd/Valor diz qual base
   const retHdr = 'Ret %';
@@ -1403,8 +1407,8 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
   if (!benchmark) {
     return (
       <React.Fragment>
-        <div className="tab-header"><div><h1>Benchmark entre casas</h1>
-          <div className="subtitle">Apostou vs concorrentes — carregando <code>benchmark.json</code>…</div></div></div>
+        <div className="tab-header"><div><h1>{title}</h1>
+          <div className="subtitle">Carregando dados…</div></div></div>
       </React.Fragment>
     );
   }
@@ -1413,8 +1417,8 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
     <React.Fragment>
       <div className="tab-header">
         <div>
-          <h1>Benchmark entre casas</h1>
-          <div className="subtitle">Apostou vs Lottu · Bet.Bet · Donald — ticket de FTD, depósito D0 e retenção D1/W1/M0 por faixa e canal</div>
+          <h1>{title}</h1>
+          <div className="subtitle">{subtitle}</div>
         </div>
       </div>
 
@@ -1473,7 +1477,7 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
       </div>
 
       <div className="support">
-        <div className="support-title">Demais Casas · {dateRangeLabel_(houseFrom, houseTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
+        <div className="support-title">{housesLabel} · {dateRangeLabel_(houseFrom, houseTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
         <table className="ch-table">
           {head}
           <tbody>
@@ -1490,12 +1494,28 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
           <strong> Mult X/FTD</strong> = depósito acumulado (incluindo o D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+resto do mês)/FTD.
           <strong> D1/W1/M0 Ret</strong> (colunas <span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelas</span>) = retenção acumulada vs D0 (D1 = dia seguinte · W1 = dias 1–7 · M0 = resto do mês do FTD).
           No modo <strong>Valor</strong> = $ depositado na janela ÷ depósito do D0 em % (exclui o D0; pode passar de 100%); no modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar.
-          Apostou via BigQuery com <strong>período próprio</strong> (jan–jun, independente do slicer global do topo); demais casas via Excel estático (jan–jun/26).
+          Apostou via BigQuery com <strong>período próprio</strong> (jan–jun, independente do slicer global do topo); {housesLabel} via Excel estático (jan–jun/26).
+          {sameday ? <strong> Coorte SAME-DAY: só FTDs que depositaram no mesmo dia do cadastro (dos dois lados). </strong> : ''}
           <strong> ⚠ Ambos vêm em jan–jun por padrão (comparável).</strong> Se filtrar o mês corrente, lembre que ele ainda está imaturo (M0 = "resto do mês" trunca coortes recentes).
         </div>
       </div>
     </React.Fragment>
   );
+}
+
+// Aba Benchmark — 3 casas (faixa_diaria) vs Apostou (coorte cheia).
+function BenchmarkTab({ retencaoFaixa, benchmark }) {
+  return <BenchmarkView retencaoFaixa={retencaoFaixa} benchmark={benchmark}
+    houseOrder={BENCH_HOUSE_ORDER} sameday={false}
+    title="Benchmark entre casas"
+    subtitle="Apostou vs Lottu · Bet.Bet · Donald — ticket de FTD, depósito D0 e retenção D1/W1/M0 por faixa e canal" />;
+}
+// Aba Same-day — só Apostou + Lottu, coorte de FTDs que depositaram no dia do cadastro.
+function SamedayTab({ retencaoFaixa, benchmarkSameday }) {
+  return <BenchmarkView retencaoFaixa={retencaoFaixa} benchmark={benchmarkSameday}
+    houseOrder={['lottu']} sameday={true}
+    title="Same-day · Apostou vs Lottu"
+    subtitle="Coorte SAME-DAY (FTD no mesmo dia do cadastro) — mesmas métricas do Benchmark, só Apostou e Lottu" />;
 }
 
 const TABS = [
@@ -1507,6 +1527,7 @@ const TABS = [
   { id: 'depositos', label: 'Depósitos', component: TabDepositos },
   { id: 'apostas', label: 'Turnover', component: TabApostas },
   { id: 'benchmark', label: 'Benchmark', component: BenchmarkTab },
+  { id: 'sameday', label: 'Same-day', component: SamedayTab },
 ];
 
 // ============================================================
@@ -1778,7 +1799,8 @@ function App() {
     rolloverMatrix: MOCK_ROLLOVER_MATRIX,
     bp: null,
     isLive: false,
-    benchmark: null,   // benchmark.json (casas concorrentes, Excel estático)
+    benchmark: null,           // benchmark.json (3 casas, Excel estático)
+    benchmarkSameday: null,    // benchmark_sameday.json (só Lottu, coorte same-day)
   });
 
   const loadData = React.useCallback((opts = {}) => {
@@ -1825,11 +1847,15 @@ function App() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Benchmark das casas concorrentes — arquivo estático servido ao lado do index.html.
+  // Benchmark das casas concorrentes — arquivos estáticos servidos ao lado do index.html.
   useEffect(() => {
     fetch('benchmark.json')
       .then(r => r.ok ? r.json() : null)
       .then(j => { if (j) setState(prev => ({ ...prev, benchmark: j })); })
+      .catch(() => {});
+    fetch('benchmark_sameday.json')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (j) setState(prev => ({ ...prev, benchmarkSameday: j })); })
       .catch(() => {});
   }, []);
 
@@ -2012,6 +2038,7 @@ function App() {
           dailyCohort={selectDailyCohort_(state.dailyCohort, chFilter)}
           retencaoFaixa={state.retencaoFaixa}
           benchmark={state.benchmark}
+          benchmarkSameday={state.benchmarkSameday}
           chFilter={chFilter}
           depM0Channels={fDepM0Channels}
           rolloverMatrix={fRolloverMatrix}
