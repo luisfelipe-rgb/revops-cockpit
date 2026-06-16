@@ -1136,85 +1136,64 @@ function chSelector_(filter) {
   return () => true;
 }
 
-// Filtra por canal + faixa, agrega por DIA de FTD, calcula retenção de valor por dia.
-function aggRetFaixaDaily_(rows, filter, faixa) {
-  if (!rows || !rows.length) return { rows: [], totals: {} };
-  const selCh = chSelector_(filter);
+// Agrega retencaoFaixa por DIA (canal via chFilter + faixa) no padrão do Benchmark (benchMetrics_).
+// mode 'qtd'|'val' afeta só as colunas de retenção. ggrM0/m0PerPlayer ficam p/ ROAS GGR e heroes.
+function aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode) {
+  const rows = benchApostouRows_(retencaoFaixa);
+  const selCh = chSelector_(chFilter);
   const selFx = (fx) => faixa === 'all' || fx === faixa;
-  const keys = ['qtdFtds','ftdTotal','depD0','cntD1','valD1','cntW1','valW1','cntM0','valM0','ggrM0'];
-  const byDay = {}, tot = {}; keys.forEach(k => tot[k] = 0);
+  const keys = ['qtd','ftd','d0','cd1','vd1','cw1','vw1','cm0','vm0','ggrM0'];
+  const zero = () => { const o = {}; keys.forEach(k => o[k] = 0); return o; };
+  const byDay = {}, tot = zero();
   rows.forEach(r => {
     if (!selCh(r.canal) || !selFx(r.faixa)) return;
-    if (!byDay[r.date]) { byDay[r.date] = {}; keys.forEach(k => byDay[r.date][k] = 0); }
+    if (!byDay[r.date]) byDay[r.date] = zero();
     keys.forEach(k => { byDay[r.date][k] += r[k] || 0; tot[k] += r[k] || 0; });
   });
-  const fin = (o, date) => {
-    const d0 = o.depD0 || 0;
-    const d1 = d0 + (o.valD1 || 0);  // $ ACUMULADOS incluindo o D0
-    const w1 = d0 + (o.valW1 || 0);  // W1 = D0 + dias 1–7
-    const m0 = d0 + (o.valM0 || 0);  // M0 = D0 + resto do mês do FTD
-    const q = o.qtdFtds || 0;
-    return {
-      date, qtdFtds: o.qtdFtds, ftdTotal: o.ftdTotal,
-      ftdMedio: o.qtdFtds ? o.ftdTotal / o.qtdFtds : null,
-      ggrM0: o.ggrM0,                // GGR (NGR) do mês do FTD — real (inclui golpe de 10/06)
-      d0, d1, w1, m0,
-      multD0: d0 ? d0 / d0 : null,   // base (D0 ÷ D0 = 1,00x)
-      multD1: d0 ? d1 / d0 : null,   // multiplicador = depósito acumulado ÷ D0
-      multW1: d0 ? w1 / d0 : null,
-      multM0: d0 ? m0 / d0 : null,
-      depMedD0: q ? d0 / q : null,   // depósito médio por FTD (acumulado incl. D0)
-      depMedD1: q ? d1 / q : null,
-      depMedW1: q ? w1 / q : null,
-      depMedM0: q ? m0 / q : null,
-    };
-  };
+  const fin = (b, date) => Object.assign(
+    { date, ggrM0: b.ggrM0, m0PerPlayer: b.qtd ? (b.d0 + b.vm0) / b.qtd : null },
+    benchMetrics_(b, mode));
   const days = Object.keys(byDay).sort();
   return { rows: days.map(d => fin(byDay[d], d)), totals: fin(tot, 'Total') };
 }
 
 function RetFaixaTable({ data, cac }) {
   const rows = data.rows || [], t = data.totals || {};
-  const range = (key) => { const v = rows.map(r => r[key]).filter(x => x != null && !isNaN(x)); return v.length ? { min: Math.min(...v), max: Math.max(...v) } : { min: 0, max: 1 }; };
-  const rD1 = range('multD1'), rW1 = range('multW1'), rM0 = range('multM0');
-  const dm = (iso) => { if (!iso) return '—'; const p = iso.split('-'); return `${p[2]}/${p[1]}`; };
+  const dm = (iso) => { if (!iso || iso === 'Total') return iso || '—'; const p = String(iso).split('-'); return `${p[2]}/${p[1]}`; };
   // ROAS GGR = GGR M0 ÷ investimento. Spend não separa por faixa → invest = CAC × Qtd FTDs (mesma base do Payback M0/CAC).
-  const roasGgr = (r) => (cac && r.qtdFtds && r.ggrM0 != null) ? r.ggrM0 / (cac * r.qtdFtds) : null;
-  const roasCell = (x) => (x == null || isNaN(x)) ? <td>—</td> : <td className={x >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(x)}</td>;
+  const roasGgr = (r) => (cac && r.qtd && r.ggrM0 != null) ? r.ggrM0 / (cac * r.qtd) : null;
+  const roasCell = (x) => (x == null || isNaN(x)) ? <td key="roas">—</td> : <td key="roas" className={x >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(x)}</td>;
+  const retTd = { background: 'rgba(250,204,21,0.10)' };
+  const retTdL = { background: 'rgba(250,204,21,0.10)', borderLeft: '2px solid rgba(250,204,21,0.45)' };
+  const retTh = { background: 'rgba(250,204,21,0.20)' };
+  const retThL = { background: 'rgba(250,204,21,0.20)', borderLeft: '2px solid rgba(250,204,21,0.55)' };
+  const cells = (r) => [
+    <td key="q">{fmtQty(r.qtd)}</td>,
+    <td key="ftd">{fmtBRL(r.ftdMedio)}</td>,
+    <td key="d0">{fmtBRL(r.d0Medio)}</td>,
+    <td key="d0f">{fmtMultiple(r.multD0F)}</td>,
+    <td key="d1f">{fmtMultiple(r.multD1F)}</td>,
+    <td key="w1f">{fmtMultiple(r.multW1F)}</td>,
+    <td key="m0f">{fmtMultiple(r.multM0F)}</td>,
+    <td key="r1" style={retTdL}>{fmtPct(r.retD1, 1)}</td>,
+    <td key="rw1" style={retTd}>{fmtPct(r.retW1, 1)}</td>,
+    <td key="rm0" style={retTd}>{fmtPct(r.retM0, 1)}</td>,
+    roasCell(roasGgr(r)),
+  ];
   return (
     <table className="ch-table">
       <thead>
         <tr>
-          <th>Data FTD</th><th>Qtd FTDs</th><th>FTD $</th><th>Tkt Médio FTD</th>
-          <th>Mult. D0</th><th>Dep méd D0</th><th>Mult. D1</th><th>Dep méd D1</th><th>Mult. W1</th><th>Dep méd W1</th><th>M0 $</th><th>Mult. M0</th><th>Dep méd M0</th><th>ROAS GGR</th>
+          <th>Data FTD</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
+          <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult M0/FTD</th>
+          <th style={retThL}>D1 Ret %</th><th style={retTh}>W1 Ret %</th><th style={retTh}>M0 Ret %</th><th>ROAS GGR</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => (
-          <tr key={i}>
-            <td className="ch-name">{dm(r.date)}</td>
-            <td>{fmtQty(r.qtdFtds)}</td>
-            <td>{fmtBRL(r.ftdTotal)}</td>
-            <td>{fmtBRL(r.ftdMedio)}</td>
-            <td>{fmtMultiple(r.multD0)}</td>
-            <td>{fmtBRL(r.depMedD0)}</td>
-            <td style={{ background: heatBg_(r.multD1, rD1.min, rD1.max) }}>{fmtMultiple(r.multD1)}</td>
-            <td>{fmtBRL(r.depMedD1)}</td>
-            <td style={{ background: heatBg_(r.multW1, rW1.min, rW1.max) }}>{fmtMultiple(r.multW1)}</td>
-            <td>{fmtBRL(r.depMedW1)}</td>
-            <td>{fmtBRL(r.m0)}</td>
-            <td style={{ background: heatBg_(r.multM0, rM0.min, rM0.max) }}>{fmtMultiple(r.multM0)}</td>
-            <td>{fmtBRL(r.depMedM0)}</td>
-            {roasCell(roasGgr(r))}
-          </tr>
-        ))}
+        {rows.map((r, i) => (<tr key={i}><td className="ch-name">{dm(r.date)}</td>{cells(r)}</tr>))}
       </tbody>
       <tfoot>
-        <tr>
-          <td>Total</td><td>{fmtQty(t.qtdFtds)}</td><td>{fmtBRL(t.ftdTotal)}</td><td>{fmtBRL(t.ftdMedio)}</td>
-          <td>{fmtMultiple(t.multD0)}</td><td>{fmtBRL(t.depMedD0)}</td><td>{fmtMultiple(t.multD1)}</td><td>{fmtBRL(t.depMedD1)}</td>
-          <td>{fmtMultiple(t.multW1)}</td><td>{fmtBRL(t.depMedW1)}</td><td>{fmtBRL(t.m0)}</td><td>{fmtMultiple(t.multM0)}</td><td>{fmtBRL(t.depMedM0)}</td>{roasCell(roasGgr(t))}
-        </tr>
+        <tr><td>Total</td>{cells(t)}</tr>
       </tfoot>
     </table>
   );
@@ -1222,18 +1201,16 @@ function RetFaixaTable({ data, cac }) {
 
 function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
   const [faixa, setFaixa] = React.useState('all');
-  const data = aggRetFaixaDaily_(retencaoFaixa, chFilter, faixa);
+  const [mode, setMode] = React.useState('qtd');   // 'qtd' (% redepositou) | 'val' (% do depósito sobre o D0)
+  const data = aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode);
   const t = data.totals || {};
   // CAC do escopo (independe da faixa — investimento não é segmentado por faixa de FTD): Σspend ÷ Σ FTD qtd.
   let sScope = 0, qScope = 0;
   (channels || []).forEach(c => { if (c.spend != null) { sScope += c.spend; qScope += (c.ftdQty || 0); } });
   const cac = qScope > 0 ? sScope / qScope : null;
-  const m0Dep = t.m0 || 0;                                             // M0 já é cumulativo incl. D0 (= D0 + resto do mês)
-  const m0PerFtd = t.ftdTotal ? m0Dep / t.ftdTotal : null;             // multiplicador M0/FTD
-  const m0PerPlayer = t.qtdFtds ? m0Dep / t.qtdFtds : null;            // M0 por jogador
-  const paybackM0 = (cac && m0PerPlayer != null) ? m0PerPlayer / cac : null; // quantas vezes o CAC voltou em M0
+  const paybackM0 = (cac && t.m0PerPlayer != null) ? t.m0PerPlayer / cac : null; // quantas vezes o CAC voltou em M0
   const heroes = [
-    { label: 'M0 / FTD', act: m0PerFtd, m1: null, pctBp: null, fmt: 'multiple' },
+    { label: 'M0 / FTD', act: t.multM0F, m1: null, pctBp: null, fmt: 'multiple' },      // (D0+M0) ÷ FTD
     { label: 'FTD médio do período', act: t.ftdMedio, m1: null, pctBp: null, fmt: 'brl' },
     { label: 'Payback M0 / CAC', act: paybackM0, m1: null, pctBp: null, fmt: 'multiple' },
   ];
@@ -1244,7 +1221,7 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
       <div className="tab-header">
         <div>
           <h1>Retenções por faixa de FTD</h1>
-          <div className="subtitle">Safra de FTD por dia, filtrável por faixa de valor do 1º depósito e por canal — multiplicadores acumulados D1 / W1 / M0 + depósito médio por FTD + ROAS GGR</div>
+          <div className="subtitle">Safra de FTD por dia (só Apostou) — ticket de FTD, depósito D0, multiplicadores D0–M0/FTD, retenção D1/W1/M0 e ROAS GGR; filtrável por faixa e canal</div>
         </div>
         <div className="slicer-group">
           <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Faixa FTD</label>
@@ -1252,6 +1229,11 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
             <option value="all">Todas</option>
             {FAIXA_LIST.map((f, i) => <option key={i} value={f}>{fxLabel_(f)}</option>)}
           </select>
+          <label style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>Retenção</label>
+          <div className="slicer-presets">
+            <button className={`preset-btn ${mode === 'val' ? 'active' : ''}`} onClick={() => setMode('val')} title="Retenção por VALOR: $ depositado na janela ÷ depósito do D0 (em %, pode passar de 100%)">Valor</button>
+            <button className={`preset-btn ${mode === 'qtd' ? 'active' : ''}`} onClick={() => setMode('qtd')} title="Retenção por QUANTIDADE: % dos FTDs que voltaram a depositar na janela">Qtd</button>
+          </div>
         </div>
       </div>
       <div className="hero-grid">
@@ -1261,9 +1243,10 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels }) {
         <div className="support-title">Safra por Dia · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
         <RetFaixaTable data={data} cac={cac} />
         <div className="ch-note">
-          Cada linha = safra de FTD daquele dia, na faixa selecionada. Depósitos <strong>acumulados incluindo o D0:</strong> D1 = D0+D1 · W1 = D0+(dias 1–7) · M0 = D0+resto do mês do FTD.
-          <strong> Mult.</strong> = depósito acumulado ÷ D0 (quantas vezes o depósito do 1º dia o jogador já depositou). <strong>Dep méd</strong> = depósito acumulado ÷ Qtd FTDs (R$ médio por jogador). Coorte = FTDs na janela de data.
-          <strong> ROAS GGR</strong> = GGR (NGR) do mês do FTD ÷ (CAC × Qtd FTDs) — invest não se separa por faixa, então usa o CAC do escopo. GGR é real (inclui perdas).
+          Cada linha = safra de FTD daquele dia, na faixa selecionada. <strong>FTD $$</strong> = ticket médio do FTD · <strong>Dep D0 Med</strong> = depósito médio no D0.
+          <strong> Mult X/FTD</strong> = depósito acumulado (incl. D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+resto do mês)/FTD.
+          <strong> D1/W1/M0 Ret</strong> (<span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelo</span>) = retenção acumulada vs D0 — modo <strong>Valor</strong> = $ da janela ÷ D0 em % (pode passar de 100%); modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar.
+          <strong> ROAS GGR</strong> = GGR (NGR) do mês do FTD ÷ (CAC × Qtd FTDs); invest não se separa por faixa, usa o CAC do escopo. GGR real (inclui perdas). Canal e data seguem o slicer global do topo.
         </div>
       </div>
     </React.Fragment>
@@ -1295,12 +1278,13 @@ function benchHouseRows_(bench, hkey) {
     qtd: r[3], ftd: r[4], d0: r[5], cd1: r[6], vd1: r[7], cw1: r[8], vw1: r[9], cm0: r[10], vm0: r[11],
   }));
 }
-// retencaoFaixa (Apostou, diária) -> mesmo shape, mantendo o dia.
+// retencaoFaixa (Apostou, diária) -> mesmo shape, mantendo o dia. ggrM0 = p/ ROAS GGR na aba Ret. Faixa.
 function benchApostouRows_(retencaoFaixa) {
   return (retencaoFaixa || []).map(r => ({
     date: String(r.date), canal: r.canal, faixa: r.faixa,
     qtd: r.qtdFtds || 0, ftd: r.ftdTotal || 0, d0: r.depD0 || 0,
     cd1: r.cntD1 || 0, vd1: r.valD1 || 0, cw1: r.cntW1 || 0, vw1: r.valW1 || 0, cm0: r.cntM0 || 0, vm0: r.valM0 || 0,
+    ggrM0: r.ggrM0 || 0,
   }));
 }
 function aggBench_(rows, sel) {
