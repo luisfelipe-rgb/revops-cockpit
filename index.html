@@ -177,6 +177,8 @@
     display: flex; justify-content: space-between;
     margin-bottom: 6px; font-size: 11px; color: var(--text-muted);
   }
+  .vs-bp-head .bp-label { color: var(--text-dim); }
+  .vs-bp-head .bp-val { color: var(--text); font-weight: 700; font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .vs-bp-head .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
   .vs-bp-head .pct.verde { color: var(--positive); }
   .vs-bp-head .pct.amarelo { color: var(--warning); }
@@ -230,6 +232,10 @@
   .ch-name { color: var(--text); font-weight: 600; }
   .ch-roas-pos { color: var(--positive); font-weight: 600; }
   .ch-roas-neg { color: var(--negative); font-weight: 600; }
+  /* Faixas do farol (rodapé) aplicadas às células vs BP: ≥95% verde · 85–94% amarelo · <85% vermelho */
+  .ch-band-verde { color: var(--positive); font-weight: 600; }
+  .ch-band-amarelo { color: var(--warning); font-weight: 600; }
+  .ch-band-vermelho { color: var(--negative); font-weight: 600; }
   /* Supporting section */
   .support {
     margin-top: 8px;
@@ -336,6 +342,7 @@ const MOCK_M = {
   retM3plus:  { act: 0.5401, bp: 0.88, m1: 0.7801, pctBp: 0.6138, fmt: 'pct', label: 'Retenção M3+' },
   // DEPÓSITOS
   depTotal:    { act: 10935097.81, bp: 20012903.23, m1: 4780033.68, pctBp: 0.5464, fmt: 'brl', label: 'Depósitos Totais' },
+  qtdDep:      { act: 184523, bp: null, m1: 91044, pctBp: null, fmt: 'qty', label: 'Qtd Depósitos' },
   depM0Total:  { act: 7617534.54,  bp: 20012903.23, m1: 1707288.65, pctBp: 0.3806, fmt: 'brl', label: 'DEP M0 Total' },
   depM0Growth: { act: 5032012.26,  bp: 16287097.02, m1: 442584.38,  pctBp: 0.3090, fmt: 'brl', label: 'DEP M0 Growth' },
   // GGR
@@ -531,7 +538,7 @@ function Hero({ metric }) {
       {pct != null && (
         <div className="vs-bp">
           <div className="vs-bp-head">
-            <span>BP {fmtVal(metric.bp, metric.fmt)}</span>
+            <span><span className="bp-label">BP</span> <span className="bp-val">{fmtVal(metric.bp, metric.fmt)}</span></span>
             <span className={`pct ${farol}`}>{fmtPct(pct, 0)}</span>
           </div>
         </div>
@@ -598,13 +605,14 @@ function ChannelTable({ channels, bp }) {
   // BP do Total = soma dos canais visíveis (acompanha o filtro de canal).
   const bpTot = channels.reduce((a, c) => { const b = byCh[c.channel]; if (b) { a.invest += b.invest || 0; a.ftdAmount += b.ftdAmount || 0; a.depD0 += b.depD0 || 0; a.ftd += b.ftd || 0; } return a; }, { invest: 0, ftdAmount: 0, depD0: 0, ftd: 0 });
 
-  // Célula colorida vs BP: ROAS (maior=melhor) verde se act≥BP; CAC (menor=melhor) verde se act≤BP.
-  // Sem BP do canal → sem cor. Mantém o "—" quando não há valor.
+  // Célula colorida vs BP pela regra de 3 faixas do rodapé (≥95% verde · 85–94% amarelo · <85% vermelho).
+  // Atingimento: ROAS (maior=melhor) = act/BP; CAC (menor=melhor) = BP/act (invertido). Sem BP → sem cor.
   const cmpCell = (act, bpv, fmt, higherBetter) => {
     if (act == null || isNaN(act)) return <td>—</td>;
     let cls = '';
     if (bpv != null && isFinite(bpv) && bpv > 0) {
-      cls = (higherBetter ? act >= bpv : act <= bpv) ? 'ch-roas-pos' : 'ch-roas-neg';
+      const pct = higherBetter ? act / bpv : bpv / act;
+      cls = 'ch-band-' + farolFromPct(pct);
     }
     return <td className={cls}>{fmt === 'brl' ? fmtBRL(act) : fmtMultiple(act)}</td>;
   };
@@ -923,7 +931,41 @@ function TabRetencao({ M, retentionChannels }) {
   );
 }
 
-function TabDepositos({ M, depM0Channels }) {
+// Qtd de depósitos do mês (transações) por canal — volume total depositado na janela.
+function DepByChannelTable({ channels }) {
+  const tot = channels.reduce((a, c) => ({ dep: a.dep + (c.depositos || 0), qtd: a.qtd + (c.qtdDep || 0) }), { dep: 0, qtd: 0 });
+  const ticket = (c) => (c.qtdDep > 0 ? c.depositos / c.qtdDep : null);
+  const rows = [...channels].sort((a, b) => (b.depositos || 0) - (a.depositos || 0));
+  return (
+    <table className="ch-table">
+      <thead>
+        <tr><th>Canal</th><th>Depósitos</th><th>Qtd Depósitos</th><th>Ticket Médio</th><th>% do Total</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((c, i) => (
+          <tr key={i}>
+            <td className="ch-name">{c.channel}</td>
+            <td>{fmtBRL(c.depositos)}</td>
+            <td>{fmtQty(c.qtdDep)}</td>
+            <td>{fmtBRL(ticket(c))}</td>
+            <td>{tot.qtd > 0 ? fmtPct((c.qtdDep || 0) / tot.qtd) : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          <td>{fmtBRL(tot.dep)}</td>
+          <td>{fmtQty(tot.qtd)}</td>
+          <td>{fmtBRL(tot.qtd > 0 ? tot.dep / tot.qtd : null)}</td>
+          <td>100%</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+function TabDepositos({ M, depM0Channels, depByChannel }) {
   return (
     <React.Fragment>
       <div className="tab-header">
@@ -934,9 +976,16 @@ function TabDepositos({ M, depM0Channels }) {
       </div>
       <div className="hero-grid">
         <Hero metric={M.depTotal} />
+        {M.qtdDep ? <Hero metric={M.qtdDep} /> : null}
         <Hero metric={M.depM0Total} />
         <Hero metric={M.depM0Growth} />
       </div>
+      {depByChannel && depByChannel.length > 0 && (
+        <div className="support">
+          <div className="support-title">Depósitos do Mês por Canal</div>
+          <DepByChannelTable channels={depByChannel} />
+        </div>
+      )}
       {depM0Channels && depM0Channels.length > 0 && (
         <div className="support">
           <div className="support-title">DEP M0 por Canal — Safra Atual</div>
@@ -1753,6 +1802,7 @@ function deriveLiveM_(M, filter, comp, retCh, depCh, bp) {
     ggr:         mk(M.ggr, ngr || null, lNgr || null),
     ggrPerDep:   mk(M.ggrPerDep, div(ngr, dep), div(lNgr, lDep)),
     depTotal:    mk(M.depTotal, dep || null, lDep || null),
+    qtdDep:      mk(M.qtdDep, sum('mtd','qtdDep') || null, sum('lm','qtdDep') || null),
     turnover:    mk(M.turnover, turn || null, lTurn || null),
     hold:        mk(M.hold, div(ngr, turn), div(lNgr, lTurn)),
     rollover:    mk(M.rollover, div(turn, dep), div(lTurn, lDep)),
@@ -1948,6 +1998,14 @@ function App() {
   const fChannels = filterByChannel(state.channels, c => c.spend != null);
   const fGgrChannels = filterByChannel(state.ggrChannels, c => c.spend != null);
   const fDepM0Channels = filterByChannel(state.depM0Channels, c => c.invest != null);
+  // Depósitos do mês por canal (qtd + valor) — derivado do componentsByChannel (player_metrics).
+  const depByChannelList = state.componentsByChannel
+    ? Object.keys(state.componentsByChannel).map(ch => {
+        const m = (state.componentsByChannel[ch] && state.componentsByChannel[ch].mtd) || {};
+        return { channel: ch, depositos: m.depositos || 0, qtdDep: m.qtdDep || 0 };
+      }).filter(c => c.depositos || c.qtdDep)
+    : null;
+  const fDepByChannel = filterByChannel(depByChannelList, null);
   const fRetentionChannels = filterByChannel(state.retentionChannels, null);
   const fRolloverMatrix = state.rolloverMatrix
     ? { ...state.rolloverMatrix, rows: filterByChannel(state.rolloverMatrix.rows, null) || [] }
@@ -2094,6 +2152,7 @@ function App() {
           benchmarkNet={state.benchmarkNet}
           chFilter={chFilter}
           depM0Channels={fDepM0Channels}
+          depByChannel={fDepByChannel}
           rolloverMatrix={fRolloverMatrix}
           isLive={state.isLive}
         />
