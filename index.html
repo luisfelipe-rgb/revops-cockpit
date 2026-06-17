@@ -1315,6 +1315,7 @@ function benchHouseRows_(bench, hkey) {
   return bench.houses[hkey].rows.map(r => ({
     date: dates[r[0]], canal: canais[r[1]], faixa: faixas[r[2]],
     qtd: r[3], ftd: r[4], d0: r[5], cd1: r[6], vd1: r[7], cw1: r[8], vw1: r[9], cm0: r[10], vm0: r[11],
+    dep: r[12] || 0, saq: r[13] || 0, net: r[14] || 0,   // saque/net (só benchmark_net.json)
   }));
 }
 // retencaoFaixa (Apostou, diária) -> mesmo shape, mantendo o dia. ggrM0 = p/ ROAS GGR na aba Ret. Faixa.
@@ -1327,7 +1328,7 @@ function benchApostouRows_(retencaoFaixa) {
   }));
 }
 function aggBench_(rows, sel) {
-  const out = { qtd: 0, ftd: 0, d0: 0, cd1: 0, vd1: 0, cw1: 0, vw1: 0, cm0: 0, vm0: 0 };
+  const out = { qtd: 0, ftd: 0, d0: 0, cd1: 0, vd1: 0, cw1: 0, vw1: 0, cm0: 0, vm0: 0, dep: 0, saq: 0, net: 0 };
   (rows || []).forEach(r => {
     // canal específico tem precedência; senão, scope 'growth' = só mídia paga (exclui social/orgânico/afiliados)
     if (sel.canal && sel.canal !== 'all') { if (r.canal !== sel.canal) return; }
@@ -1337,6 +1338,7 @@ function aggBench_(rows, sel) {
     if (sel.to && r.date > sel.to) return;
     out.qtd += r.qtd; out.ftd += r.ftd; out.d0 += r.d0;
     out.cd1 += r.cd1; out.vd1 += r.vd1; out.cw1 += r.cw1; out.vw1 += r.vw1; out.cm0 += r.cm0; out.vm0 += r.vm0;
+    out.dep += r.dep || 0; out.saq += r.saq || 0; out.net += r.net || 0;
   });
   return out;
 }
@@ -1362,12 +1364,13 @@ const BENCH_SEL_STYLE = { background: 'var(--surface)', border: '1px solid var(-
 
 // View genérica do Benchmark — parametrizada por houseOrder + sameday (p/ reusar na aba Same-day).
 // pkey = prefixo de persistência (filtros sobrevivem a refresh/troca de aba).
-function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, subtitle, pkey }) {
-  // Apostou puxa o PERÍODO PRÓPRIO (jan–jun, = span das casas) via modo leve only=retfaixa
-  // (sameday=1 quando coorte same-day), independente do slicer global. Fallback no prop só no modo normal.
+function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, subtitle, pkey, apostouHouse, withNet }) {
+  // fromBench = Apostou vem do PRÓPRIO JSON (que tem saque/net), não do BQ (aba net Apostou vs Lottu).
+  // Caso contrário, Apostou puxa o período próprio (jan–jun) via modo leve only=retfaixa do BQ.
+  const fromBench = !!apostouHouse;
   const [aptFetch, setAptFetch] = React.useState({ rows: null, loading: false, error: null });
   React.useEffect(() => {
-    if (!benchmark || !ENDPOINT_URL) return;
+    if (fromBench || !benchmark || !ENDPOINT_URL) return;
     const fullFrom = benchmark.dateMin;   // = span exato das casas (diário)
     const fullTo = benchmark.dateMax;
     setAptFetch(s => ({ ...s, loading: true, error: null }));
@@ -1375,11 +1378,14 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(j => { if (j.error) throw new Error(j.error); setAptFetch({ rows: j.retencaoFaixa || [], loading: false, error: null }); })
       .catch(e => setAptFetch({ rows: null, loading: false, error: String(e.message || e) }));
-  }, [benchmark, sameday]);
+  }, [benchmark, sameday, fromBench]);
 
-  // No sameday não cai no fallback global (que é coorte cheia) — espera o fetch.
-  const aptSource = (aptFetch.rows && aptFetch.rows.length) ? aptFetch.rows : (sameday ? [] : retencaoFaixa);
-  const aptRows = React.useMemo(() => benchApostouRows_(aptSource), [aptSource]);
+  const aptRows = React.useMemo(() => {
+    if (fromBench) return benchHouseRows_(benchmark, apostouHouse);
+    // No sameday não cai no fallback global (que é coorte cheia) — espera o fetch.
+    const src = (aptFetch.rows && aptFetch.rows.length) ? aptFetch.rows : (sameday ? [] : retencaoFaixa);
+    return benchApostouRows_(src);
+  }, [fromBench, benchmark, apostouHouse, aptFetch.rows, retencaoFaixa, sameday]);
   const houseRowsMap = React.useMemo(() => {
     const m = {}; houseOrder.forEach(h => { m[h] = benchHouseRows_(benchmark, h); }); return m;
   }, [benchmark]);
@@ -1395,21 +1401,34 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
   const [scope, setScope] = usePersistedState(`rvops:${pkey}:scope`, 'all');   // 'all' (Total Casa) | 'growth' (só mídia paga)
   const [faixa, setFaixa] = usePersistedState(`rvops:${pkey}:faixa`, 'all');
   const [mode, setMode] = usePersistedState(`rvops:${pkey}:mode`, 'qtd');       // 'qtd' (% redepositou) | 'val' (% sobre D0)
+  const [cash, setCash] = usePersistedState(`rvops:${pkey}:cash`, 'liquido');   // 'bruto' (retenção) | 'liquido' (caixa net) — só withNet
+  const netMode = withNet && cash === 'liquido';
   const [aptFrom, setAptFrom] = React.useState(null);
   const [aptTo, setAptTo] = React.useState(null);
   const [houseFrom, setHouseFrom] = React.useState(null);
   const [houseTo, setHouseTo] = React.useState(null);
 
-  // default das datas = MÊS MAIS RECENTE dos dados (junho), em cada lado, quando os dados chegam.
-  React.useEffect(() => { if (aptBounds) { setAptFrom(aptBounds.max.slice(0, 7) + '-01'); setAptTo(aptBounds.max); } }, [aptBounds]);
-  React.useEffect(() => { if (houseMin && houseMax) { setHouseFrom(houseMax.slice(0, 7) + '-01'); setHouseTo(houseMax); } }, [houseMin, houseMax]);
+  // default das datas: aba net = span CHEIO (net é caixa de vida da safra, comparação justa no período todo);
+  // demais abas = mês mais recente (junho). Em cada lado, quando os dados chegam.
+  React.useEffect(() => { if (aptBounds) {
+    if (withNet) { setAptFrom(aptBounds.min); setAptTo(aptBounds.max); }
+    else { setAptFrom(aptBounds.max.slice(0, 7) + '-01'); setAptTo(aptBounds.max); }
+  } }, [aptBounds]);
+  React.useEffect(() => { if (houseMin && houseMax) {
+    if (withNet) { setHouseFrom(houseMin); setHouseTo(houseMax); }
+    else { setHouseFrom(houseMax.slice(0, 7) + '-01'); setHouseTo(houseMax); }
+  } }, [houseMin, houseMax]);
 
-  const apt = benchMetrics_(aggBench_(aptRows, { canal, scope, faixa, from: aptFrom, to: aptTo }), mode);
-  const houses = houseOrder.map(h => ({
-    key: h,
-    label: (benchmark && benchmark.houses && benchmark.houses[h] && benchmark.houses[h].label) || h,
-    m: benchMetrics_(aggBench_(houseRowsMap[h], { canal, scope, faixa, from: houseFrom, to: houseTo }), mode),
-  }));
+  const aptAgg = aggBench_(aptRows, { canal, scope, faixa, from: aptFrom, to: aptTo });
+  const apt = benchMetrics_(aptAgg, mode);
+  const houses = houseOrder.map(h => {
+    const agg = aggBench_(houseRowsMap[h], { canal, scope, faixa, from: houseFrom, to: houseTo });
+    return {
+      key: h,
+      label: (benchmark && benchmark.houses && benchmark.houses[h] && benchmark.houses[h].label) || h,
+      m: benchMetrics_(agg, mode), agg,
+    };
+  });
   // Rótulo do escopo de canal p/ os títulos das tabelas
   const canalLabel = canal !== 'all' ? canal : (scope === 'growth' ? 'Canais Growth' : 'todos os canais');
   // Título da 2ª tabela: 1 casa só = o nome dela; várias = "Demais Casas"
@@ -1444,6 +1463,26 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
       <th style={retThL}>{`D1 ${retHdr}`}</th><th style={retTh}>{`W1 ${retHdr}`}</th><th style={retTh}>{`M0 ${retHdr}`}</th>
     </tr></thead>
   );
+
+  // Modo LÍQUIDO (aba net): caixa da safra. Net = depósito − saque (totais da safra, não por janela).
+  const div_ = (x, y) => (y ? x / y : null);
+  const netRowCells = (a) => [
+    <td key="q">{fmtQty(a.qtd)}</td>,
+    <td key="ftd">{fmtBRL(div_(a.ftd, a.qtd))}</td>,
+    <td key="dep">{fmtBRL(a.dep)}</td>,
+    <td key="net">{fmtBRL(a.net)}</td>,
+    <td key="netftd">{fmtBRL(div_(a.net, a.qtd))}</td>,
+    <td key="multnet">{fmtMultiple(div_(a.net, a.ftd))}</td>,
+    <td key="saqp" style={{ background: 'rgba(248,113,113,0.10)' }}>{fmtPct(div_(a.saq, a.dep), 1)}</td>,
+  ];
+  const netHead = (
+    <thead><tr>
+      <th>Casa</th><th>Qtd FTD</th><th>FTD $$</th><th>Depósito</th><th>Net</th><th>Net/FTD</th><th>Mult Net/FTD$</th>
+      <th style={{ background: 'rgba(248,113,113,0.18)' }}>Saque %</th>
+    </tr></thead>
+  );
+  const tableHead = netMode ? netHead : head;
+  const aptCells = netMode ? netRowCells(aptAgg) : benchRowCells(apt);
 
   if (!benchmark) {
     return (
@@ -1482,13 +1521,24 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
             {faixaOptions.map((f, i) => <option key={i} value={f}>{fxLabel_(f)}</option>)}
           </select>
         </div>
-        <div className="slicer-group">
-          <label style={lblStyle}>Retenção</label>
-          <div className="slicer-presets">
-            <button className={`preset-btn ${mode === 'val' ? 'active' : ''}`} onClick={() => setMode('val')} title="Retenção por VALOR: $ depositado na janela ÷ depósito do D0 (multiplicador)">Valor</button>
-            <button className={`preset-btn ${mode === 'qtd' ? 'active' : ''}`} onClick={() => setMode('qtd')} title="Retenção por QUANTIDADE: % dos FTDs que voltaram a depositar na janela">Qtd</button>
+        {withNet && (
+          <div className="slicer-group">
+            <label style={lblStyle}>Caixa</label>
+            <div className="slicer-presets">
+              <button className={`preset-btn ${cash === 'bruto' ? 'active' : ''}`} onClick={() => setCash('bruto')} title="BRUTO: curva de retenção do depósito (D0→M0), sem descontar saques.">Bruto</button>
+              <button className={`preset-btn ${cash === 'liquido' ? 'active' : ''}`} onClick={() => setCash('liquido')} title="LÍQUIDO: caixa da safra = depósito − saque (net_cash). Mostra o dinheiro que ficou.">Líquido</button>
+            </div>
           </div>
-        </div>
+        )}
+        {!netMode && (
+          <div className="slicer-group">
+            <label style={lblStyle}>Retenção</label>
+            <div className="slicer-presets">
+              <button className={`preset-btn ${mode === 'val' ? 'active' : ''}`} onClick={() => setMode('val')} title="Retenção por VALOR: $ depositado na janela ÷ depósito do D0 (multiplicador)">Valor</button>
+              <button className={`preset-btn ${mode === 'qtd' ? 'active' : ''}`} onClick={() => setMode('qtd')} title="Retenção por QUANTIDADE: % dos FTDs que voltaram a depositar na janela">Qtd</button>
+            </div>
+          </div>
+        )}
         <div className="slicer-divider" />
         <div className="slicer-group">
           <label style={lblStyle}>Data Apostou</label>
@@ -1507,11 +1557,11 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
       <div className="support">
         <div className="support-title">Apostou · {dateRangeLabel_(aptFrom, aptTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{aptFetch.loading ? ' · carregando BQ…' : ''}{aptFetch.error ? ' · erro (usando janela global)' : ''}</div>
         <table className="ch-table">
-          {head}
+          {tableHead}
           <tbody>
             <tr>
               <td className="ch-name">Apostou</td>
-              {benchRowCells(apt)}
+              {aptCells}
             </tr>
           </tbody>
         </table>
@@ -1520,24 +1570,33 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
       <div className="support">
         <div className="support-title">{housesLabel} · {dateRangeLabel_(houseFrom, houseTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
         <table className="ch-table">
-          {head}
+          {tableHead}
           <tbody>
             {houses.map((h) => (
               <tr key={h.key}>
                 <td className="ch-name">{h.label}</td>
-                {benchRowCells(h.m)}
+                {netMode ? netRowCells(h.agg) : benchRowCells(h.m)}
               </tr>
             ))}
           </tbody>
         </table>
         <div className="ch-note">
-          <strong>Qtd FTD</strong> = nº de 1ºs depósitos · <strong>FTD $$</strong> = ticket médio do FTD (Σ FTD ÷ qtd) · <strong>Dep D0 Med</strong> = depósito médio no D0 (Σ D0 ÷ qtd).
-          <strong> Mult X/FTD</strong> = depósito acumulado (incluindo o D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+resto do mês)/FTD.
-          <strong> D1/W1/M0 Ret</strong> (colunas <span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelas</span>) = retenção acumulada vs D0 (D1 = dia seguinte · W1 = dias 1–7 · M0 = resto do mês do FTD).
-          No modo <strong>Valor</strong> = $ depositado na janela ÷ depósito do D0 em % (exclui o D0; pode passar de 100%); no modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar.
-          Apostou via BigQuery com <strong>período próprio</strong> (jan–jun, independente do slicer global do topo); {housesLabel} via Excel estático (jan–jun/26).
-          {sameday ? <strong> Coorte SAME-DAY: só FTDs que depositaram no mesmo dia do cadastro (dos dois lados). </strong> : ''}
-          <strong> ⚠ Ambos vêm em jan–jun por padrão (comparável).</strong> Se filtrar o mês corrente, lembre que ele ainda está imaturo (M0 = "resto do mês" trunca coortes recentes).
+          {netMode ? (
+            <React.Fragment>
+              <strong>Modo LÍQUIDO (caixa da safra).</strong> <strong>Depósito</strong> = Σ depósito da safra · <strong>Net</strong> = depósito − saque (net_cash) = dinheiro que ficou · <strong>Net/FTD</strong> = net ÷ nº de FTDs · <strong>Mult Net/FTD$</strong> = net ÷ valor depositado no FTD · <strong style={{ background: 'rgba(248,113,113,0.25)', padding: '0 4px', borderRadius: '3px' }}>Saque %</strong> = saque ÷ depósito.
+              Net/saque são <strong>totais da safra</strong> (não por janela D0/D1/W1) — por isso o modo líquido não tem a curva de retenção; troque pra <strong>Bruto</strong> p/ ver D0→M0. Os dois lados (Apostou e Lottu) vêm das planilhas faixa_diaria com saque; default = span cheio (jan–jun).
+            </React.Fragment>
+          ) : (
+            <React.Fragment>
+              <strong>Qtd FTD</strong> = nº de 1ºs depósitos · <strong>FTD $$</strong> = ticket médio do FTD (Σ FTD ÷ qtd) · <strong>Dep D0 Med</strong> = depósito médio no D0 (Σ D0 ÷ qtd).
+              <strong> Mult X/FTD</strong> = depósito acumulado (incluindo o D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+resto do mês)/FTD.
+              <strong> D1/W1/M0 Ret</strong> (colunas <span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelas</span>) = retenção acumulada vs D0 (D1 = dia seguinte · W1 = dias 1–7 · M0 = resto do mês do FTD).
+              No modo <strong>Valor</strong> = $ depositado na janela ÷ depósito do D0 em % (exclui o D0; pode passar de 100%); no modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar.
+              {fromBench ? <span> Os dois lados vêm das planilhas faixa_diaria.</span> : <span> Apostou via BigQuery com <strong>período próprio</strong> (jan–jun); {housesLabel} via Excel estático.</span>}
+              {sameday ? <strong> Coorte SAME-DAY: só FTDs que depositaram no mesmo dia do cadastro (dos dois lados). </strong> : ''}
+              <strong> ⚠ Ambos vêm em jan–jun por padrão (comparável).</strong> Se filtrar o mês corrente, lembre que ele ainda está imaturo (M0 = "resto do mês" trunca coortes recentes).
+            </React.Fragment>
+          )}
         </div>
       </div>
     </React.Fragment>
@@ -1551,12 +1610,13 @@ function BenchmarkTab({ retencaoFaixa, benchmark }) {
     title="Benchmark entre casas"
     subtitle="Apostou vs Lottu · Bet.Bet · Donald — ticket de FTD, depósito D0 e retenção D1/W1/M0 por faixa e canal" />;
 }
-// Aba Same-day — só Apostou + Lottu, coorte de FTDs que depositaram no dia do cadastro.
-function SamedayTab({ retencaoFaixa, benchmarkSameday }) {
-  return <BenchmarkView retencaoFaixa={retencaoFaixa} benchmark={benchmarkSameday}
-    houseOrder={['lottu']} sameday={true} pkey="sameday"
-    title="Same-day · Apostou vs Lottu"
-    subtitle="Coorte SAME-DAY (FTD no mesmo dia do cadastro) — mesmas métricas do Benchmark, só Apostou e Lottu" />;
+// Aba Apostou vs Lottu — faixa_diaria com SAQUE/NET; slicer Bruto/Líquido. Os DOIS lados vêm das
+// planilhas (Apostou do CSV "Base FTD Com saques", pq o BQ não tem saque/net). Substituiu a Same-day.
+function NetBenchTab({ benchmarkNet }) {
+  return <BenchmarkView benchmark={benchmarkNet}
+    apostouHouse="apostou" houseOrder={['lottu']} sameday={false} withNet={true} pkey="netbench"
+    title="Apostou vs Lottu"
+    subtitle="Ticket de FTD, depósito e CAIXA LÍQUIDO (depósito − saque) por faixa e canal — slicer Bruto/Líquido" />;
 }
 
 const TABS = [
@@ -1568,7 +1628,7 @@ const TABS = [
   { id: 'depositos', label: 'Depósitos', component: TabDepositos },
   { id: 'apostas', label: 'Turnover', component: TabApostas },
   { id: 'benchmark', label: 'Benchmark', component: BenchmarkTab },
-  { id: 'sameday', label: 'Same-day', component: SamedayTab },
+  { id: 'sameday', label: 'Apostou vs Lottu', component: NetBenchTab },
 ];
 
 // ============================================================
@@ -1788,6 +1848,7 @@ function App() {
     isLive: false,
     benchmark: null,           // benchmark.json (3 casas, Excel estático)
     benchmarkSameday: null,    // benchmark_sameday.json (só Lottu, coorte same-day)
+    benchmarkNet: null,        // benchmark_net.json (Apostou + Lottu, faixa_diaria com saque/net)
   });
 
   const loadData = React.useCallback((opts = {}) => {
@@ -1842,6 +1903,10 @@ function App() {
     fetch('benchmark_sameday.json')
       .then(r => r.ok ? r.json() : null)
       .then(j => { if (j) setState(prev => ({ ...prev, benchmarkSameday: j })); })
+      .catch(() => {});
+    fetch('benchmark_net.json')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (j) setState(prev => ({ ...prev, benchmarkNet: j })); })
       .catch(() => {});
   }, []);
 
@@ -2026,6 +2091,7 @@ function App() {
           retencaoFaixa={state.retencaoFaixa}
           benchmark={state.benchmark}
           benchmarkSameday={state.benchmarkSameday}
+          benchmarkNet={state.benchmarkNet}
           chFilter={chFilter}
           depM0Channels={fDepM0Channels}
           rolloverMatrix={fRolloverMatrix}
