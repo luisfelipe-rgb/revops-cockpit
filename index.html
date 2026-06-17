@@ -2003,7 +2003,7 @@ function App() {
     ? Object.keys(state.componentsByChannel).map(ch => {
         const m = (state.componentsByChannel[ch] && state.componentsByChannel[ch].mtd) || {};
         return { channel: ch, depositos: m.depositos || 0, qtdDep: m.qtdDep || 0 };
-      }).filter(c => c.depositos || c.qtdDep)
+      }).filter(c => c.qtdDep > 0)   // só com qtd do backend (@34+); pré-deploy a tabela some
     : null;
   const fDepByChannel = filterByChannel(depByChannelList, null);
   const fRetentionChannels = filterByChannel(state.retentionChannels, null);
