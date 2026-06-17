@@ -21,6 +21,7 @@
     --warning: #fbbf24;
     --negative: #f87171;
     --accent: #60a5fa;
+    --accent-yellow: #facc15;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -105,19 +106,19 @@
     text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
   }
   .slicer input[type="date"] {
-    background: var(--surface); border: 1px solid var(--border);
+    background: rgba(250, 204, 21, .06); border: 1px solid rgba(250, 204, 21, .45);
     color: var(--text); font-family: inherit; font-size: 12px;
     padding: 6px 10px; border-radius: 6px; outline: none;
     color-scheme: dark;
   }
-  .slicer input[type="date"]:focus { border-color: var(--accent); }
+  .slicer input[type="date"]:focus { border-color: var(--accent-yellow); }
   .slicer select {
-    background: var(--surface); border: 1px solid var(--border);
+    background: rgba(250, 204, 21, .06); border: 1px solid rgba(250, 204, 21, .45);
     color: var(--text); font-family: inherit; font-size: 12px;
     padding: 6px 10px; border-radius: 6px; outline: none;
     cursor: pointer; color-scheme: dark; max-width: 220px;
   }
-  .slicer select:focus { border-color: var(--accent); }
+  .slicer select:focus { border-color: var(--accent-yellow); }
   .slicer-divider { width: 1px; height: 24px; background: var(--border); }
   .slicer-arrow { color: var(--text-dim); font-size: 12px; }
   .slicer-presets { display: flex; gap: 4px; margin-left: 6px; }
@@ -127,10 +128,10 @@
     border-radius: 6px; cursor: pointer; font-family: inherit;
     transition: all .15s;
   }
-  .preset-btn:hover { color: var(--text); border-color: var(--border-strong); }
-  .preset-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .preset-btn:hover { color: var(--text); border-color: rgba(250, 204, 21, .5); }
+  .preset-btn.active { background: var(--accent-yellow); color: #000; border-color: var(--accent-yellow); font-weight: 600; }
   .apply-btn {
-    background: var(--accent); border: none; color: var(--bg);
+    background: var(--accent-yellow); border: none; color: #000;
     padding: 7px 16px; font-size: 12px; font-weight: 600;
     border-radius: 6px; cursor: pointer; font-family: inherit;
     margin-left: auto;
@@ -150,8 +151,8 @@
     font-family: inherit; white-space: nowrap;
     transition: color .15s, border-color .15s;
   }
-  .tab-btn:hover { color: var(--text); }
-  .tab-btn.active { color: var(--text); border-bottom-color: var(--text); }
+  .tab-btn:hover { color: var(--accent-yellow); }
+  .tab-btn.active { color: var(--accent-yellow); border-bottom-color: var(--accent-yellow); }
   main {
     padding: 40px 32px 60px;
     max-width: 1240px; margin: 0 auto;
@@ -234,6 +235,7 @@
   .delta-m1 .up { color: var(--positive); }
   .delta-m1 .down { color: var(--negative); }
   /* Channel table */
+  .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .ch-table {
     width: 100%; border-collapse: collapse;
     background: var(--surface); border: 1px solid var(--border);
@@ -324,9 +326,36 @@
   @media (max-width: 900px) {
     .hero-grid { grid-template-columns: 1fr; }
     main { padding: 28px 18px 48px; }
-    .topbar { padding: 12px 18px; }
-    .tabs { padding: 0 18px; }
+    /* Once the top bars wrap, their heights no longer match the hard-coded
+       sticky offsets (65px / 126px) and they overlap. Let topbar + slicer
+       scroll away and pin only the tab bar. */
+    .topbar { position: static; padding: 12px 18px; }
+    .slicer { position: static; top: auto; }
+    .tabs { position: sticky; top: 0; padding: 0 18px; }
     .hero .value { font-size: 32px; }
+  }
+  @media (max-width: 600px) {
+    html, body { font-size: 12.5px; }
+    .topbar { padding: 11px 16px; gap: 8px; }
+    .brand { font-size: 17px; }
+    .controls { gap: 6px; }
+    .slicer { padding: 12px 16px; gap: 10px; }
+    .tabs { padding: 0 12px; }
+    .tab-btn { padding: 13px 14px; }
+    main { padding: 22px 16px 44px; }
+    .tab-header { margin-bottom: 22px; }
+    .tab-header h1 { font-size: 21px; }
+    .hero { padding: 18px; }
+    .hero .value { font-size: 30px; }
+    /* Stack each filter group onto its own full-width row */
+    .slicer-group { flex: 1 1 100%; flex-wrap: wrap; }
+    .slicer-group select,
+    .slicer-group input[type="date"] { flex: 1 1 130px; min-width: 0; max-width: none; }
+    .slicer-divider { display: none; }
+    .slicer-presets { flex-wrap: wrap; }
+    .apply-btn { flex: 1 1 100%; }
+    .ch-table th, .ch-table td { padding: 9px 11px; font-size: 11.5px; }
+    .ch-table thead th { font-size: 9.5px; }
   }
 </style>
 </head>
@@ -656,7 +685,7 @@ function ChannelTable({ channels, bp }) {
   };
 
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr>
           <th>Canal</th>
@@ -695,7 +724,7 @@ function ChannelTable({ channels, bp }) {
           <td>{fmtBRL(tot.ftdQty > 0 ? tot.ftdAmount / tot.ftdQty : null)}</td>
         </tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -731,7 +760,7 @@ function GgrChannelTable({ channels, payback }) {
   };
 
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr>
           <th>Canal</th>
@@ -764,7 +793,7 @@ function GgrChannelTable({ channels, payback }) {
           <td>{tot.hasFreespin ? fmtBRL(tot.freespin) : '—'}</td>
         </tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -783,7 +812,7 @@ function RolloverMatrix({ data }) {
     : null);
 
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr>
           <th>Canal</th>
@@ -807,7 +836,7 @@ function RolloverMatrix({ data }) {
           <td>{fmtMultiple(totAll)}</td>
         </tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -829,7 +858,7 @@ function DepM0Table({ channels }) {
   };
 
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr>
           <th>Canal</th>
@@ -859,7 +888,7 @@ function DepM0Table({ channels }) {
           <td>100%</td>
         </tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -883,7 +912,7 @@ function RetentionTable({ channels, totalM3plus }) {
   const m3Total = (totalM3plus !== undefined && totalM3plus !== null) ? totalM3plus : rate(tot.n3, tot.d3);
 
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr>
           <th>Canal</th>
@@ -913,7 +942,7 @@ function RetentionTable({ channels, totalM3plus }) {
           <td>{fmtPct(m3Total)}</td>
         </tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -975,7 +1004,7 @@ function DepByChannelTable({ channels }) {
   const ticket = (c) => (c.qtdDep > 0 ? c.depositos / c.qtdDep : null);
   const rows = [...channels].sort((a, b) => (b.depositos || 0) - (a.depositos || 0));
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr><th>Canal</th><th>Depósitos</th><th>Qtd Depósitos</th><th>Ticket Médio</th><th>% do Total</th></tr>
       </thead>
@@ -999,7 +1028,7 @@ function DepByChannelTable({ channels }) {
           <td>100%</td>
         </tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -1116,7 +1145,9 @@ function heatBg_(v, min, max) {
 }
 
 function DailyCohortTable({ data }) {
-  const rows = data.rows || [];
+  // Esconde dias sem dado de conversão (só spend carregado; FTD/depósito ainda não
+  // chegaram do player_metrics) — senão aparecem linhas vazias no fim da tabela.
+  const rows = (data.rows || []).filter(r => (r.ftdQty > 0) || (r.d0 > 0));
   const t = data.totals || {};
   const range = (key) => {
     const vals = rows.map(r => r[key]).filter(v => v != null && !isNaN(v));
@@ -1127,7 +1158,7 @@ function DailyCohortTable({ data }) {
   const tktFtd = (o) => (o.ftdQty > 0 ? o.ftdAmt / o.ftdQty : null);
 
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr>
           <th>Data FTD</th>
@@ -1175,7 +1206,7 @@ function DailyCohortTable({ data }) {
           <td>{fmtPct(t.retW1, 1)}</td>
         </tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -1286,7 +1317,7 @@ function RetFaixaTable({ data }) {
     <td key="rm0" style={retTd}>{fmtPct(r.retM0, 1)}</td>,
   ];
   return (
-    <table className="ch-table">
+    <div className="table-scroll"><table className="ch-table">
       <thead>
         <tr>
           <th>Data FTD</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
@@ -1300,7 +1331,7 @@ function RetFaixaTable({ data }) {
       <tfoot>
         <tr><td>Total</td>{cells(t)}</tr>
       </tfoot>
-    </table>
+    </table></div>
   );
 }
 
@@ -1341,7 +1372,7 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp }) {
     { label: 'Payback M0 / CAC', act: paybackM0, m1: null, pctBp: null, fmt: 'multiple' },
   ];
   const chLabel = (chFilter && chFilter.channel) ? chFilter.channel : (chFilter && chFilter.scope === 'growth' ? 'Canais Growth' : 'Total Casa');
-  const selStyle = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' };
+  const selStyle = { background: 'rgba(250,204,21,.06)', border: '1px solid rgba(250,204,21,.45)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' };
   return (
     <React.Fragment>
       <div className="tab-header">
@@ -1446,7 +1477,7 @@ function benchMetrics_(a, mode) {
   };
 }
 
-const BENCH_SEL_STYLE = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' };
+const BENCH_SEL_STYLE = { background: 'rgba(250,204,21,.06)', border: '1px solid rgba(250,204,21,.45)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' };
 
 // View genérica do Benchmark — parametrizada por houseOrder + sameday (p/ reusar na aba Same-day).
 // pkey = prefixo de persistência (filtros sobrevivem a refresh/troca de aba).
@@ -1642,7 +1673,7 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
 
       <div className="support">
         <div className="support-title">Apostou · {dateRangeLabel_(aptFrom, aptTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{aptFetch.loading ? ' · carregando BQ…' : ''}{aptFetch.error ? ' · erro (usando janela global)' : ''}</div>
-        <table className="ch-table">
+        <div className="table-scroll"><table className="ch-table">
           {tableHead}
           <tbody>
             <tr>
@@ -1650,12 +1681,12 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
               {aptCells}
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <div className="support">
         <div className="support-title">{housesLabel} · {dateRangeLabel_(houseFrom, houseTo)} · {canalLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
-        <table className="ch-table">
+        <div className="table-scroll"><table className="ch-table">
           {tableHead}
           <tbody>
             {houses.map((h) => (
@@ -1665,7 +1696,7 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <div className="ch-note">
           {netMode ? (
             <React.Fragment>
@@ -1948,7 +1979,7 @@ function SegurancaTab({ user }) {
           <button className="apply-btn" type="submit" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}</button>
         </form>
         {err && <div style={{ color: 'var(--negative)', fontSize: '12px', marginBottom: '8px' }}>{err}</div>}
-        <table className="ch-table">
+        <div className="table-scroll"><table className="ch-table">
           <thead><tr><th>E-mail</th><th>Nome</th><th>Admin</th><th></th></tr></thead>
           <tbody>
             {(users || []).map((u, i) => (
@@ -1962,7 +1993,7 @@ function SegurancaTab({ user }) {
             {users && users.length === 0 && <tr><td colSpan="4" style={{ color: 'var(--text-muted)' }}>nenhum usuário</td></tr>}
             {!users && !err && <tr><td colSpan="4" style={{ color: 'var(--text-muted)' }}>carregando…</td></tr>}
           </tbody>
-        </table>
+        </table></div>
         <div className="ch-note">A senha é definida aqui e guardada em <strong>hash</strong> (não dá pra ler depois) — passe ao usuário por um canal seguro. Reenviar com o mesmo e-mail <strong>redefine</strong> a senha. Remover tira o acesso (sessões ativas expiram em até 6h).</div>
       </div>
     </React.Fragment>
