@@ -1189,7 +1189,7 @@ function DailyCohortTable({ data }) {
             <td style={{ background: heatBg_(r.retD1, rD1.min, rD1.max) }}>{fmtPct(r.retD1, 1)}</td>
             <td style={{ background: heatBg_(r.retW1, rW1.min, rW1.max) }}>{fmtPct(r.retW1, 1)}</td>
             <td>{fmtBRL(r.freespin)}</td>
-            <td>{fmtBRL(r.rollover)}</td>
+            <td>{fmtMultiple(r.rollover)}</td>
             <td>{fmtBRL(r.bonus)}</td>
           </tr>
         ))}
@@ -1205,7 +1205,7 @@ function DailyCohortTable({ data }) {
           <td>{fmtPct(t.retD1, 1)}</td>
           <td>{fmtPct(t.retW1, 1)}</td>
           <td>{fmtBRL(t.freespin)}</td>
-          <td>{fmtBRL(t.rollover)}</td>
+          <td>{fmtMultiple(t.rollover)}</td>
           <td>{fmtBRL(t.bonus)}</td>
         </tr>
       </tfoot>
@@ -1241,7 +1241,7 @@ function TabSafras({ dailyCohort, chFilter }) {
         <DailyCohortTable data={dailyCohort} />
         <div className="ch-note">
           Cada linha = safra de FTD daquele dia. <strong>Tx Passagem</strong> = FTD ÷ registros do dia · <strong>Ret. D1 / W1</strong> = depósito do dia 1 | dias 1–7 ÷ depósito do D0.
-          <strong> Freespin · Rollover · Bonificações</strong> (saldo real + cashback + torneio) = totais da safra no <strong>M0</strong> (mês do FTD), via player_metrics.
+          <strong> Freespin</strong> = ganhos de freespin · <strong>Rollover</strong> = turnover ÷ depósito (×) · <strong>Bonificações</strong> = saldo real + cashback + torneio — todos no <strong>M0</strong> (mês do FTD), via player_metrics.
           Safras recentes sem dado de retenção/M0 aparecem como — (dependem da player_metrics).
         </div>
       </div>
