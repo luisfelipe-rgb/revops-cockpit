@@ -1168,13 +1168,13 @@ function DailyCohortTable({ data }) {
           <th>Tx Passagem</th>
           <th>Tx Pass. mesmo dia</th>
           <th>Tkt Médio FTD</th>
-          <th>D0 $</th>
           <th>Tkt Médio D0</th>
-          <th>D1 $</th>
           <th>Tkt Médio D1</th>
           <th>Ret. D1</th>
-          <th>W1 $</th>
           <th>Ret. W1</th>
+          <th>Freespin</th>
+          <th>Rollover</th>
+          <th>Bonificações</th>
         </tr>
       </thead>
       <tbody>
@@ -1184,13 +1184,13 @@ function DailyCohortTable({ data }) {
             <td>{fmtPct(r.txPass, 1)}</td>
             <td>{fmtPct(r.txPassSD, 1)}</td>
             <td>{fmtBRL(tktFtd(r))}</td>
-            <td>{fmtBRL(r.d0)}</td>
             <td>{fmtBRL(r.tktD0)}</td>
-            <td>{fmtBRL(r.d1)}</td>
             <td>{fmtBRL(r.tktD1)}</td>
             <td style={{ background: heatBg_(r.retD1, rD1.min, rD1.max) }}>{fmtPct(r.retD1, 1)}</td>
-            <td>{fmtBRL(r.w1)}</td>
             <td style={{ background: heatBg_(r.retW1, rW1.min, rW1.max) }}>{fmtPct(r.retW1, 1)}</td>
+            <td>{fmtBRL(r.freespin)}</td>
+            <td>{fmtBRL(r.rollover)}</td>
+            <td>{fmtBRL(r.bonus)}</td>
           </tr>
         ))}
       </tbody>
@@ -1200,13 +1200,13 @@ function DailyCohortTable({ data }) {
           <td>{fmtPct(t.txPass, 1)}</td>
           <td>{fmtPct(t.txPassSD, 1)}</td>
           <td>{fmtBRL(tktFtd(t))}</td>
-          <td>{fmtBRL(t.d0)}</td>
           <td>{fmtBRL(t.tktD0)}</td>
-          <td>{fmtBRL(t.d1)}</td>
           <td>{fmtBRL(t.tktD1)}</td>
           <td>{fmtPct(t.retD1, 1)}</td>
-          <td>{fmtBRL(t.w1)}</td>
           <td>{fmtPct(t.retW1, 1)}</td>
+          <td>{fmtBRL(t.freespin)}</td>
+          <td>{fmtBRL(t.rollover)}</td>
+          <td>{fmtBRL(t.bonus)}</td>
         </tr>
       </tfoot>
     </table></div>
@@ -1230,7 +1230,7 @@ function TabSafras({ dailyCohort, chFilter }) {
       <div className="tab-header">
         <div>
           <h1>Safras Diárias</h1>
-          <div className="subtitle">Qualidade da safra de FTD por dia — passagem, depósito e retenção D0/D1/W1</div>
+          <div className="subtitle">Qualidade da safra de FTD por dia — passagem, retenção e atividade M0 (freespin, rollover, bonificações)</div>
         </div>
       </div>
       <div className="hero-grid">
@@ -1240,9 +1240,9 @@ function TabSafras({ dailyCohort, chFilter }) {
         <div className="support-title">Safra por Dia · {chLabel}</div>
         <DailyCohortTable data={dailyCohort} />
         <div className="ch-note">
-          Cada linha = safra de FTD daquele dia. <strong>D0</strong> = depósito no dia do FTD · <strong>D1</strong> = dia seguinte · <strong>W1</strong> = acumulado dos dias 1–7.
-          <strong> Ret. D1 / W1</strong> = D1 | W1 ÷ D0. <strong>Tx Passagem</strong> = FTD ÷ registros do dia.
-          Safras recentes ainda sem dado de D1/W1 aparecem como —.
+          Cada linha = safra de FTD daquele dia. <strong>Tx Passagem</strong> = FTD ÷ registros do dia · <strong>Ret. D1 / W1</strong> = depósito do dia 1 | dias 1–7 ÷ depósito do D0.
+          <strong> Freespin · Rollover · Bonificações</strong> (saldo real + cashback + torneio) = totais da safra no <strong>M0</strong> (mês do FTD), via player_metrics.
+          Safras recentes sem dado de retenção/M0 aparecem como — (dependem da player_metrics).
         </div>
       </div>
     </React.Fragment>
