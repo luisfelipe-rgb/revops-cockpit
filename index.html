@@ -1285,7 +1285,7 @@ function aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode) {
   const rows = benchApostouRows_(retencaoFaixa);
   const selCh = chSelector_(chFilter);
   const selFx = (fx) => faixa === 'all' || fx === faixa;
-  const keys = ['qtd','ftd','d0','cd1','vd1','cw1','vw1','cm0','vm0','ggrM0'];
+  const keys = ['qtd','ftd','d0','cd1','vd1','cw1','vw1','cw2','vw2','cm0','vm0','ggrM0'];
   const zero = () => { const o = {}; keys.forEach(k => o[k] = 0); return o; };
   const byDay = {}, tot = zero();
   rows.forEach(r => {
@@ -1306,7 +1306,7 @@ function RetFaixaTable({ data }) {
   // Heatmap por coluna (vermelho→amarelo→verde, min/max das linhas) nas retenções —
   // igual à aba Safras Diárias. Total (heat=false) mantém o amarelo chapado.
   const range = (key) => { const v = rows.map(x => x[key]).filter(x => x != null && !isNaN(x)); return v.length ? { min: Math.min(...v), max: Math.max(...v) } : { min: 0, max: 1 }; };
-  const rD1 = range('retD1'), rW1 = range('retW1'), rM0 = range('retM0');
+  const rD1 = range('retD1'), rW1 = range('retW1'), rW2 = range('retW2'), rM0 = range('retM0');
   const retTh = { background: 'rgba(250,204,21,0.20)' };
   const retThL = { background: 'rgba(250,204,21,0.20)', borderLeft: '2px solid rgba(250,204,21,0.55)' };
   const retCell = (v, rng, heat, left) => {
@@ -1320,9 +1320,11 @@ function RetFaixaTable({ data }) {
     <td key="d0f">{fmtMultiple(r.multD0F)}</td>,
     <td key="d1f">{fmtMultiple(r.multD1F)}</td>,
     <td key="w1f">{fmtMultiple(r.multW1F)}</td>,
+    <td key="w2f">{fmtMultiple(r.multW2F)}</td>,
     <td key="m0f">{fmtMultiple(r.multM0F)}</td>,
     <td key="r1" style={retCell(r.retD1, rD1, heat, true)}>{fmtPct(r.retD1, 1)}</td>,
     <td key="rw1" style={retCell(r.retW1, rW1, heat, false)}>{fmtPct(r.retW1, 1)}</td>,
+    <td key="rw2" style={retCell(r.retW2, rW2, heat, false)}>{fmtPct(r.retW2, 1)}</td>,
     <td key="rm0" style={retCell(r.retM0, rM0, heat, false)}>{fmtPct(r.retM0, 1)}</td>,
   ];
   return (
@@ -1330,8 +1332,8 @@ function RetFaixaTable({ data }) {
       <thead>
         <tr>
           <th>Data FTD</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
-          <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult M0/FTD</th>
-          <th style={retThL}>D1 Ret %</th><th style={retTh}>W1 Ret %</th><th style={retTh}>M0 Ret %</th>
+          <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult W2/FTD</th><th>Mult M0/FTD</th>
+          <th style={retThL}>D1 Ret %</th><th style={retTh}>W1 Ret %</th><th style={retTh}>W2 Ret %</th><th style={retTh}>M0 Ret %</th>
         </tr>
       </thead>
       <tbody>
@@ -1344,10 +1346,23 @@ function RetFaixaTable({ data }) {
   );
 }
 
-function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp }) {
+function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
   const [faixa, setFaixa] = React.useState('all');
   const [mode, setMode] = React.useState('qtd');   // 'qtd' (% redepositou) | 'val' (% do depósito sobre o D0)
-  const data = aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode);
+  const [sameday, setSameday] = React.useState(false);  // só FTDs que depositaram no MESMO dia do cadastro
+  // Same-day puxado sob demanda (only=retfaixa&sameday=1) p/ a MESMA janela global; sem custo extra quando off.
+  const [sdFetch, setSdFetch] = React.useState({ rows: null, loading: false, error: null });
+  const winFrom = meta && meta.from, winTo = meta && meta.to;
+  React.useEffect(() => {
+    if (!sameday || !winFrom || !winTo || !ENDPOINT_URL) return;
+    setSdFetch(s => ({ ...s, loading: true, error: null }));
+    fetch(`${ENDPOINT_URL}?${authParam_()}&from=${winFrom}&to=${winTo}&only=retfaixa&sameday=1`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(j => { if (j.error) throw new Error(j.error); setSdFetch({ rows: j.retencaoFaixa || [], loading: false, error: null }); })
+      .catch(e => setSdFetch({ rows: null, loading: false, error: String(e.message || e) }));
+  }, [sameday, winFrom, winTo]);
+  const srcRF = sameday ? (sdFetch.rows || []) : retencaoFaixa;
+  const data = aggRetFaixaBench_(srcRF, chFilter, faixa, mode);
   const t = data.totals || {};
   // CAC do escopo (independe da faixa — investimento não é segmentado por faixa de FTD): Σspend ÷ Σ FTD qtd.
   let sScope = 0, qScope = 0;
@@ -1371,7 +1386,7 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp }) {
       bpScope = { m0: h.m0tt, ftdAmount: h.ftdAmountTt, ftd: h.ftdTt };
     }
   }
-  const showBp = faixa === 'all' && bpScope;
+  const showBp = faixa === 'all' && bpScope && !sameday;   // o plano não tem figura same-day → sem farol nesse modo
   const bpMultM0F  = (showBp && bpScope.ftdAmount > 0) ? bpScope.m0 / bpScope.ftdAmount : null;
   const bpFtdMedio = (showBp && bpScope.ftd > 0) ? bpScope.ftdAmount / bpScope.ftd : null;
   const pb = (act, bpv) => (bpv && act != null) ? act / bpv : null;
@@ -1400,18 +1415,23 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp }) {
             <button className={`preset-btn ${mode === 'val' ? 'active' : ''}`} onClick={() => setMode('val')} title="Retenção por VALOR: $ depositado na janela ÷ depósito do D0 (em %, pode passar de 100%)">Valor</button>
             <button className={`preset-btn ${mode === 'qtd' ? 'active' : ''}`} onClick={() => setMode('qtd')} title="Retenção por QUANTIDADE: % dos FTDs que voltaram a depositar na janela">Qtd</button>
           </div>
+          <label style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>Coorte</label>
+          <div className="slicer-presets">
+            <button className={`preset-btn ${!sameday ? 'active' : ''}`} onClick={() => setSameday(false)} title="Todos os FTDs da janela">Todos</button>
+            <button className={`preset-btn ${sameday ? 'active' : ''}`} onClick={() => setSameday(true)} title="Só FTDs que depositaram no MESMO dia do cadastro (FTD = dia do cadastro)">Same-day</button>
+          </div>
         </div>
       </div>
       <div className="hero-grid">
         {heroes.map((m, i) => <Hero key={i} metric={m} />)}
       </div>
       <div className="support">
-        <div className="support-title">Safra por Dia · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}</div>
+        <div className="support-title">Safra por Dia · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{sameday ? ' · same-day' : ''}{sameday && sdFetch.loading ? ' · carregando…' : ''}{sameday && sdFetch.error ? ' · erro ao carregar' : ''}</div>
         <RetFaixaTable data={data} />
         <div className="ch-note">
           Cada linha = safra de FTD daquele dia, na faixa selecionada. <strong>FTD $$</strong> = ticket médio do FTD · <strong>Dep D0 Med</strong> = depósito médio no D0.
-          <strong> Mult X/FTD</strong> = depósito acumulado (incl. D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+resto do mês)/FTD.
-          <strong> D1/W1/M0 Ret</strong> (<span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelo</span>) = retenção acumulada vs D0 — modo <strong>Valor</strong> = $ da janela ÷ D0 em % (pode passar de 100%); modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar. Canal e data seguem o slicer global do topo.
+          <strong> Mult X/FTD</strong> = depósito acumulado (incl. D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+dias 1–14)/FTD · (D0+resto do mês)/FTD.
+          <strong> D1/W1/W2/M0 Ret</strong> (<span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelo</span>) = retenção acumulada vs D0 — modo <strong>Valor</strong> = $ da janela ÷ D0 em % (pode passar de 100%); modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar. Canal e data seguem o slicer global do topo; <strong>Coorte Same-day</strong> = só FTDs que depositaram no mesmo dia do cadastro.
         </div>
       </div>
     </React.Fragment>
@@ -1449,12 +1469,12 @@ function benchApostouRows_(retencaoFaixa) {
   return (retencaoFaixa || []).map(r => ({
     date: String(r.date), canal: r.canal, faixa: r.faixa,
     qtd: r.qtdFtds || 0, ftd: r.ftdTotal || 0, d0: r.depD0 || 0,
-    cd1: r.cntD1 || 0, vd1: r.valD1 || 0, cw1: r.cntW1 || 0, vw1: r.valW1 || 0, cm0: r.cntM0 || 0, vm0: r.valM0 || 0,
+    cd1: r.cntD1 || 0, vd1: r.valD1 || 0, cw1: r.cntW1 || 0, vw1: r.valW1 || 0, cw2: r.cntW2 || 0, vw2: r.valW2 || 0, cm0: r.cntM0 || 0, vm0: r.valM0 || 0,
     ggrM0: r.ggrM0 || 0,
   }));
 }
 function aggBench_(rows, sel) {
-  const out = { qtd: 0, ftd: 0, d0: 0, cd1: 0, vd1: 0, cw1: 0, vw1: 0, cm0: 0, vm0: 0, dep: 0, saq: 0, net: 0 };
+  const out = { qtd: 0, ftd: 0, d0: 0, cd1: 0, vd1: 0, cw1: 0, vw1: 0, cw2: 0, vw2: 0, cm0: 0, vm0: 0, dep: 0, saq: 0, net: 0 };
   (rows || []).forEach(r => {
     // canal específico tem precedência; senão, scope 'growth' = só mídia paga (exclui social/orgânico/afiliados)
     if (sel.canal && sel.canal !== 'all') { if (r.canal !== sel.canal) return; }
@@ -1463,7 +1483,7 @@ function aggBench_(rows, sel) {
     if (sel.from && r.date < sel.from) return;
     if (sel.to && r.date > sel.to) return;
     out.qtd += r.qtd; out.ftd += r.ftd; out.d0 += r.d0;
-    out.cd1 += r.cd1; out.vd1 += r.vd1; out.cw1 += r.cw1; out.vw1 += r.vw1; out.cm0 += r.cm0; out.vm0 += r.vm0;
+    out.cd1 += r.cd1; out.vd1 += r.vd1; out.cw1 += r.cw1; out.vw1 += r.vw1; out.cw2 += r.cw2 || 0; out.vw2 += r.vw2 || 0; out.cm0 += r.cm0; out.vm0 += r.vm0;
     out.dep += r.dep || 0; out.saq += r.saq || 0; out.net += r.net || 0;
   });
   return out;
@@ -1479,9 +1499,11 @@ function benchMetrics_(a, mode) {
     multD0F: multF(a.d0),                      // D0 ÷ FTD
     multD1F: multF(a.d0 + a.vd1),              // (D0 + dia 1) ÷ FTD — acumulado
     multW1F: multF(a.d0 + a.vw1),              // (D0 + dias 1–7) ÷ FTD
+    multW2F: multF(a.d0 + (a.vw2 || 0)),       // (D0 + dias 1–14) ÷ FTD
     multM0F: multF(a.d0 + a.vm0),              // (D0 + resto do mês do FTD) ÷ FTD
     retD1: ret(a.cd1, a.vd1),
     retW1: ret(a.cw1, a.vw1),
+    retW2: ret(a.cw2 || 0, a.vw2 || 0),
     retM0: ret(a.cm0, a.vm0),
   };
 }
@@ -2294,6 +2316,7 @@ function App({ user, onLogout }) {
           ggrPayback={state.ggrPayback}
           dailyCohort={selectDailyCohort_(state.dailyCohort, chFilter)}
           retencaoFaixa={state.retencaoFaixa}
+          meta={state.meta}
           benchmark={state.benchmark}
           benchmarkSameday={state.benchmarkSameday}
           benchmarkNet={state.benchmarkNet}
