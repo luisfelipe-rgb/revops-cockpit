@@ -413,8 +413,6 @@ const MOCK_M = {
   // DEPÓSITOS
   depTotal:    { act: 10935097.81, bp: 20012903.23, m1: 4780033.68, pctBp: 0.5464, fmt: 'brl', label: 'Depósitos Totais' },
   qtdDep:      { act: 184523, bp: null, m1: 91044, pctBp: null, fmt: 'qty', label: 'Qtd Depósitos' },
-  saqueTotal:  { act: 9823145.20, bp: null, m1: 4231004.55, pctBp: null, fmt: 'brl', label: 'Valor de Saques' },
-  qtdSaque:    { act: 33218, bp: null, m1: 16004, pctBp: null, fmt: 'qty', label: 'Qtd Saques' },
   depM0Total:  { act: 7617534.54,  bp: 20012903.23, m1: 1707288.65, pctBp: 0.3806, fmt: 'brl', label: 'DEP M0 Total' },
   depM0Growth: { act: 5032012.26,  bp: 16287097.02, m1: 442584.38,  pctBp: 0.3090, fmt: 'brl', label: 'DEP M0 Growth' },
   // GGR
@@ -1056,8 +1054,6 @@ function TabDepositos({ M, depM0Channels, depByChannel }) {
       <div className="hero-grid">
         <Hero metric={M.depTotal} />
         {M.qtdDep ? <Hero metric={M.qtdDep} /> : null}
-        {M.saqueTotal ? <Hero metric={M.saqueTotal} /> : null}
-        {M.qtdSaque ? <Hero metric={M.qtdSaque} /> : null}
         <Hero metric={M.depM0Total} />
       </div>
       {depByChannel && depByChannel.length > 0 && (
@@ -1913,8 +1909,6 @@ function deriveLiveM_(M, filter, comp, retCh, depCh, bp) {
     ggrPerDep:   mk(M.ggrPerDep, div(ngr, dep), div(lNgr, lDep)),
     depTotal:    mk(M.depTotal, dep || null, lDep || null),
     qtdDep:      mk(M.qtdDep, sum('mtd','qtdDep') || null, sum('lm','qtdDep') || null),
-    saqueTotal:  mk(M.saqueTotal, sum('mtd','saques') || null, sum('lm','saques') || null),
-    qtdSaque:    mk(M.qtdSaque, sum('mtd','qtdSaque') || null, sum('lm','qtdSaque') || null),
     turnover:    mk(M.turnover, turn || null, lTurn || null),
     hold:        mk(M.hold, div(ngr, turn), div(lNgr, lTurn)),
     rollover:    mk(M.rollover, div(turn, dep), div(lTurn, lDep)),
