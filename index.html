@@ -413,6 +413,8 @@ const MOCK_M = {
   // DEPÓSITOS
   depTotal:    { act: 10935097.81, bp: 20012903.23, m1: 4780033.68, pctBp: 0.5464, fmt: 'brl', label: 'Depósitos Totais' },
   qtdDep:      { act: 184523, bp: null, m1: 91044, pctBp: null, fmt: 'qty', label: 'Qtd Depósitos' },
+  saqueTotal:  { act: 9823145.20, bp: null, m1: 4231004.55, pctBp: null, fmt: 'brl', label: 'Valor de Saques' },
+  qtdSaque:    { act: 33218, bp: null, m1: 16004, pctBp: null, fmt: 'qty', label: 'Qtd Saques' },
   depM0Total:  { act: 7617534.54,  bp: 20012903.23, m1: 1707288.65, pctBp: 0.3806, fmt: 'brl', label: 'DEP M0 Total' },
   depM0Growth: { act: 5032012.26,  bp: 16287097.02, m1: 442584.38,  pctBp: 0.3090, fmt: 'brl', label: 'DEP M0 Growth' },
   // GGR
@@ -1001,15 +1003,18 @@ function TabRetencao({ M, retentionChannels }) {
   );
 }
 
-// Qtd de depósitos do mês (transações) por canal — volume total depositado na janela.
+// Depósito e saque do mês (transações) por canal — volume total na janela.
 function DepByChannelTable({ channels }) {
-  const tot = channels.reduce((a, c) => ({ dep: a.dep + (c.depositos || 0), qtd: a.qtd + (c.qtdDep || 0) }), { dep: 0, qtd: 0 });
+  const tot = channels.reduce((a, c) => ({
+    dep: a.dep + (c.depositos || 0), qtd: a.qtd + (c.qtdDep || 0),
+    saq: a.saq + (c.saques || 0), qsaq: a.qsaq + (c.qtdSaque || 0),
+  }), { dep: 0, qtd: 0, saq: 0, qsaq: 0 });
   const ticket = (c) => (c.qtdDep > 0 ? c.depositos / c.qtdDep : null);
   const rows = [...channels].sort((a, b) => (b.depositos || 0) - (a.depositos || 0));
   return (
     <div className="table-scroll"><table className="ch-table">
       <thead>
-        <tr><th>Canal</th><th>Depósitos</th><th>Qtd Depósitos</th><th>Ticket Médio</th><th>% do Total</th></tr>
+        <tr><th>Canal</th><th>Depósitos</th><th>Qtd Depósitos</th><th>Saques</th><th>Qtd Saques</th><th>Ticket Médio</th><th>% do Total</th></tr>
       </thead>
       <tbody>
         {rows.map((c, i) => (
@@ -1017,6 +1022,8 @@ function DepByChannelTable({ channels }) {
             <td className="ch-name">{c.channel}</td>
             <td>{fmtBRL(c.depositos)}</td>
             <td>{fmtQty(c.qtdDep)}</td>
+            <td>{fmtBRL(c.saques)}</td>
+            <td>{fmtQty(c.qtdSaque)}</td>
             <td>{fmtBRL(ticket(c))}</td>
             <td>{tot.qtd > 0 ? fmtPct((c.qtdDep || 0) / tot.qtd) : '—'}</td>
           </tr>
@@ -1027,6 +1034,8 @@ function DepByChannelTable({ channels }) {
           <td>Total</td>
           <td>{fmtBRL(tot.dep)}</td>
           <td>{fmtQty(tot.qtd)}</td>
+          <td>{fmtBRL(tot.saq)}</td>
+          <td>{fmtQty(tot.qsaq)}</td>
           <td>{fmtBRL(tot.qtd > 0 ? tot.dep / tot.qtd : null)}</td>
           <td>100%</td>
         </tr>
@@ -1047,6 +1056,8 @@ function TabDepositos({ M, depM0Channels, depByChannel }) {
       <div className="hero-grid">
         <Hero metric={M.depTotal} />
         {M.qtdDep ? <Hero metric={M.qtdDep} /> : null}
+        {M.saqueTotal ? <Hero metric={M.saqueTotal} /> : null}
+        {M.qtdSaque ? <Hero metric={M.qtdSaque} /> : null}
         <Hero metric={M.depM0Total} />
       </div>
       {depByChannel && depByChannel.length > 0 && (
@@ -1902,6 +1913,8 @@ function deriveLiveM_(M, filter, comp, retCh, depCh, bp) {
     ggrPerDep:   mk(M.ggrPerDep, div(ngr, dep), div(lNgr, lDep)),
     depTotal:    mk(M.depTotal, dep || null, lDep || null),
     qtdDep:      mk(M.qtdDep, sum('mtd','qtdDep') || null, sum('lm','qtdDep') || null),
+    saqueTotal:  mk(M.saqueTotal, sum('mtd','saques') || null, sum('lm','saques') || null),
+    qtdSaque:    mk(M.qtdSaque, sum('mtd','qtdSaque') || null, sum('lm','qtdSaque') || null),
     turnover:    mk(M.turnover, turn || null, lTurn || null),
     hold:        mk(M.hold, div(ngr, turn), div(lNgr, lTurn)),
     rollover:    mk(M.rollover, div(turn, dep), div(lTurn, lDep)),
@@ -2166,7 +2179,7 @@ function App({ user, onLogout }) {
   const depByChannelList = state.componentsByChannel
     ? Object.keys(state.componentsByChannel).map(ch => {
         const m = (state.componentsByChannel[ch] && state.componentsByChannel[ch].mtd) || {};
-        return { channel: ch, depositos: m.depositos || 0, qtdDep: m.qtdDep || 0 };
+        return { channel: ch, depositos: m.depositos || 0, qtdDep: m.qtdDep || 0, saques: m.saques || 0, qtdSaque: m.qtdSaque || 0 };
       }).filter(c => c.qtdDep > 0)   // só com qtd do backend (@34+); pré-deploy a tabela some
     : null;
   const fDepByChannel = filterByChannel(depByChannelList, null);
