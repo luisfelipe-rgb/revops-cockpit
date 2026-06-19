@@ -465,13 +465,13 @@ const MOCK_CHANNELS = [
 // Mock — GGR por canal (modo dev). Live vem de payload.ggrChannels.
 // "GGR" do negócio = ngr_total da player_metrics (regra Apostou).
 const MOCK_GGR_CHANNELS = [
-  { channel: 'Meta',          ggr: 612400, spend: 1842300, freespin: 48200 },
-  { channel: 'Google',        ggr: 488100, spend: 1120800, freespin: 31500 },
-  { channel: 'TikTok',        ggr: 156800, spend: 421500,  freespin: 14800 },
-  { channel: 'Kwai',          ggr: -12400, spend: 182525,  freespin: 6200 },
-  { channel: 'Orgânico (sem atribuição)', ggr: 269400, spend: null, freespin: 22900 },
-  { channel: 'Afiliados',     ggr: 121700, spend: null, freespin: 9800 },
-  { channel: 'Social Media',  ggr: 54300,  spend: null, freespin: 4100 },
+  { channel: 'Meta',          ggr: 612400, spend: 1842300, freespin: 48200, ggrCasino: 629980, ggrEsporte: 30620, ggrLoteria: 0, bonus: 122480 },
+  { channel: 'Google',        ggr: 488100, spend: 1120800, freespin: 31500, ggrCasino: 495195, ggrEsporte: 24405, ggrLoteria: 0, bonus: 97620 },
+  { channel: 'TikTok',        ggr: 156800, spend: 421500,  freespin: 14800, ggrCasino: 163760, ggrEsporte: 7840,  ggrLoteria: 0, bonus: 31360 },
+  { channel: 'Kwai',          ggr: -12400, spend: 182525,  freespin: 6200,  ggrCasino: -5580,  ggrEsporte: -620,  ggrLoteria: 0, bonus: 2480 },
+  { channel: 'Orgânico (sem atribuição)', ggr: 269400, spend: null, freespin: 22900, ggrCasino: 278830, ggrEsporte: 13470, ggrLoteria: 0, bonus: 53880 },
+  { channel: 'Afiliados',     ggr: 121700, spend: null, freespin: 9800, ggrCasino: 125415, ggrEsporte: 6085, ggrLoteria: 0, bonus: 24340 },
+  { channel: 'Social Media',  ggr: 54300,  spend: null, freespin: 4100, ggrCasino: 55685, ggrEsporte: 2715, ggrLoteria: 0, bonus: 10860 },
 ];
 
 // Mock — payback de GGR por canal (modo dev). Live vem de payload.ggrPayback.
@@ -739,12 +739,14 @@ function ChannelTable({ channels, bp }) {
 function GgrChannelTable({ channels, payback }) {
   const tot = channels.reduce((a, c) => ({
     ggr: a.ggr + (c.ggr || 0),
+    bonus: a.bonus + (c.bonus || 0),
     spend: a.spend + (c.spend || 0),
     freespin: a.freespin + (c.freespin || 0),
     hasFreespin: a.hasFreespin || c.freespin != null,
-  }), { ggr: 0, spend: 0, freespin: 0, hasFreespin: false });
+  }), { ggr: 0, bonus: 0, spend: 0, freespin: 0, hasFreespin: false });
 
   const roasGgr = (c) => (c.spend != null && c.spend > 0 && c.ggr != null ? c.ggr / c.spend : null);
+  const ngrOf = (c) => (c.ggr != null ? c.ggr - (c.bonus || 0) : null);
   const roasCell = (r) => {
     if (r == null) return <td>—</td>;
     return <td className={r >= 1 ? 'ch-roas-pos' : 'ch-roas-neg'}>{fmtMultiple(r)}</td>;
@@ -768,6 +770,7 @@ function GgrChannelTable({ channels, payback }) {
         <tr>
           <th>Canal</th>
           <th>GGR</th>
+          <th>NGR</th>
           <th>Investimento</th>
           <th>ROAS GGR</th>
           <th>Payback GGR</th>
@@ -779,6 +782,7 @@ function GgrChannelTable({ channels, payback }) {
           <tr key={i}>
             <td className="ch-name">{c.channel}</td>
             {ggrCell(c.ggr)}
+            {ggrCell(ngrOf(c))}
             <td>{fmtBRL(c.spend)}</td>
             {roasCell(roasGgr(c))}
             {paybackCell(byCh[c.channel])}
@@ -790,6 +794,7 @@ function GgrChannelTable({ channels, payback }) {
         <tr>
           <td>Total</td>
           {ggrCell(tot.ggr)}
+          {ggrCell(tot.ggr - tot.bonus)}
           <td>{fmtBRL(tot.spend)}</td>
           {roasCell(tot.spend > 0 ? tot.ggr / tot.spend : null)}
           {paybackCell(payback && payback.total)}
@@ -1074,6 +1079,16 @@ function TabDepositos({ M, depM0Channels, depByChannel }) {
 
 function TabGgr({ M, ggrChannels, ggrPayback }) {
   const H = (ggrPayback && ggrPayback.horizonDays) || 90;
+  const [ggrView, setGgrView] = usePersistedState('rvops:ggrView', 'total');
+  // Split do MESMO GGR do painel (ngr): Casino sai LÍQUIDO de freespin (freespin é
+  // mecânica de casino) → Casino + Sportsbook + Loteria = GGR do card.
+  const vert = (ggrChannels || []).reduce((a, c) => ({
+    casino:  a.casino  + ((c.ggrCasino || 0) - (c.freespin || 0)),
+    sports:  a.sports  + (c.ggrEsporte || 0),
+    lottery: a.lottery + (c.ggrLoteria || 0),
+  }), { casino: 0, sports: 0, lottery: 0 });
+  const vcard = (label, val) => ({ act: val, m1: null, bp: null, pctBp: null, fmt: 'brl', label });
+  const hasVert = (ggrChannels || []).some(c => c.ggrCasino != null || c.ggrEsporte != null);
   return (
     <React.Fragment>
       <div className="tab-header">
@@ -1081,9 +1096,23 @@ function TabGgr({ M, ggrChannels, ggrPayback }) {
           <h1>Gestão de GGR</h1>
           <div className="subtitle">Receita bruta, margem e projeção de fechamento</div>
         </div>
+        {hasVert && (
+          <div className="slicer-presets">
+            <button className={`preset-btn ${ggrView === 'total' ? 'active' : ''}`} onClick={() => setGgrView('total')} title="GGR consolidado (= o GGR do painel).">Total</button>
+            <button className={`preset-btn ${ggrView === 'vertical' ? 'active' : ''}`} onClick={() => setGgrView('vertical')} title="Split do GGR do painel: Casino (líquido de freespin) vs Sportsbook. Soma = GGR.">Por vertical</button>
+          </div>
+        )}
       </div>
       <div className="hero-grid">
-        <Hero metric={M.ggr} />
+        {ggrView === 'vertical' && hasVert ? (
+          <React.Fragment>
+            <Hero metric={vcard('GGR Casino', vert.casino)} />
+            <Hero metric={vcard('GGR Sportsbook', vert.sports)} />
+            {Math.abs(vert.lottery) > 0.5 ? <Hero metric={vcard('GGR Loteria', vert.lottery)} /> : null}
+          </React.Fragment>
+        ) : (
+          <Hero metric={M.ggr} />
+        )}
         <Hero metric={M.ggrPerDep} />
         <Hero metric={M.ggrTrend} />
       </div>
@@ -1092,7 +1121,8 @@ function TabGgr({ M, ggrChannels, ggrPayback }) {
           <div className="support-title">GGR por Canal</div>
           <GgrChannelTable channels={ggrChannels} payback={ggrPayback} />
           <div className="ch-note">
-            <strong>Payback GGR</strong> = dias até o GGR (NGR) acumulado da safra cobrir o investimento.
+            <strong>NGR</strong> = GGR (do painel) − bonificações (cash bonus; freespin NÃO é descontado).
+            <strong> Payback GGR</strong> = dias até o GGR (NGR) acumulado da safra cobrir o investimento.
             Base independente do filtro de data: safras maduras (FTD há ≥{H} dias), horizonte de {H} dias.
             <span className="ch-roas-neg">{` >${H}d`}</span> = não atingiu o payback dentro do horizonte.
           </div>
