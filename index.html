@@ -239,6 +239,15 @@
   .delta-m1 .down { color: var(--negative); }
   /* Channel table */
   .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Tabelas diárias longas (Safras, Ret.Faixa): scroll vertical próprio + cabeçalho/rodapé fixos.
+     A moldura (borda/raio) vai pro wrapper porque .ch-table tem overflow:hidden, que quebraria o sticky. */
+  .table-scroll.tall {
+    max-height: 620px; overflow: auto;
+    border: 1px solid var(--border); border-radius: 10px;
+  }
+  .table-scroll.tall .ch-table { border: none; border-radius: 0; overflow: visible; }
+  .table-scroll.tall thead th { position: sticky; top: 0; z-index: 2; }
+  .table-scroll.tall tfoot td { position: sticky; bottom: 0; z-index: 2; }
   .ch-table {
     width: 100%; border-collapse: collapse;
     background: var(--surface); border: 1px solid var(--border);
@@ -1204,7 +1213,7 @@ function DailyCohortTable({ data }) {
   const tktFtd = (o) => (o.ftdQty > 0 ? o.ftdAmt / o.ftdQty : null);
 
   return (
-    <div className="table-scroll"><table className="ch-table">
+    <div className="table-scroll tall"><table className="ch-table">
       <thead>
         <tr>
           <th>Data FTD</th>
@@ -1371,7 +1380,7 @@ function RetFaixaTable({ data }) {
     <td key="rm0" style={retCell(r.retM0, rM0, heat, false)}>{fmtPct(r.retM0, 1)}</td>,
   ];
   return (
-    <div className="table-scroll"><table className="ch-table">
+    <div className="table-scroll tall"><table className="ch-table">
       <thead>
         <tr>
           <th>Data FTD</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
