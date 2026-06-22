@@ -1303,7 +1303,7 @@ function TabSafras({ dailyCohort, chFilter }) {
 }
 
 // ===== Retenções por faixa de FTD — diária; faixa de valor do FTD + canal = filtros =====
-const FAIXA_LIST = ['01. Até R$10','02. R$10–20','03. R$20–30','04. R$30–50','05. R$50–75','06. R$75–100','07. R$100–200','08. R$200+'];
+const FAIXA_LIST = ['01. R$0–10','02. R$10–25','03. R$25–50','04. R$50–100','05. R$100+'];
 const fxLabel_ = (f) => String(f).replace(/^\d+\.\s*/, '');
 
 // Mock (modo dev) — dias 01–11/06 × canais × faixas.
