@@ -1398,6 +1398,11 @@ function weekLabel_(startIso) {
   const f = (off) => { const x = new Date(Date.UTC(y, m - 1, d + off)); return String(x.getUTCDate()).padStart(2, '0') + '/' + String(x.getUTCMonth() + 1).padStart(2, '0'); };
   return f(0) + '–' + f(6);
 }
+// 'YYYY-MM-DD' + n dias (n pode ser negativo) → 'YYYY-MM-DD' (UTC puro, sem fuso).
+function isoAddDays_(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
 
 // Agrega retencaoFaixa por DIA ou SEMANA (gran='day'|'week'; canal via chFilter + faixa) no padrão do
 // Benchmark (benchMetrics_). SEMANAL re-agrega as bases aditivas e RECALCULA as métricas (não é média
@@ -1423,8 +1428,9 @@ function aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode, gran) {
   return { rows: ks.map(k => fin(by[k], weekly ? weekLabel_(k) : k)), totals: fin(tot, 'Total') };
 }
 
-function RetFaixaTable({ data, dateLabel }) {
+function RetFaixaTable({ data, dateLabel, m0Label }) {
   const rows = data.rows || [], t = data.totals || {};
+  const mL = m0Label || 'M0';
   const dm = (s) => { if (!s || s === 'Total') return s || '—'; const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s)); return m ? `${m[3]}/${m[2]}` : String(s); };
   // Heatmap por coluna (vermelho→amarelo→verde, min/max das linhas) nas retenções —
   // igual à aba Safras Diárias. Total (heat=false) mantém o amarelo chapado.
@@ -1457,8 +1463,8 @@ function RetFaixaTable({ data, dateLabel }) {
       <thead>
         <tr>
           <th>{dateLabel || 'Data FTD'}</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
-          <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult W2/FTD</th><th>Mult M0/FTD</th>
-          <th style={retThL}>D1 Ret %</th><th style={retTh}>W1 Ret %</th><th style={retTh}>W2 Ret %</th><th style={retTh}>M0 Ret %</th>
+          <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult W2/FTD</th><th>Mult {mL}/FTD</th>
+          <th style={retThL}>D1 Ret %</th><th style={retTh}>W1 Ret %</th><th style={retTh}>W2 Ret %</th><th style={retTh}>{mL} Ret %</th>
         </tr>
       </thead>
       <tbody>
@@ -1476,25 +1482,50 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
   const [mode, setMode] = React.useState('qtd');   // 'qtd' (% redepositou) | 'val' (% do depósito sobre o D0)
   const [sameday, setSameday] = React.useState(false);  // só FTDs que depositaram no MESMO dia do cadastro
   const [gran, setGran] = React.useState('day');        // 'day' | 'week' (colapsa em médias semanais)
+  const [view, setView] = React.useState('calendario'); // 'calendario' (M0 = fim do mês) | 'coorte' (M0 = 30 dias corridos, só coortes fechadas)
+  const cohort = view === 'coorte';
   // Same-day puxado sob demanda (only=retfaixa&sameday=1) p/ a MESMA janela global; sem custo extra quando off.
   const [sdFetch, setSdFetch] = React.useState({ rows: null, loading: false, error: null });
   const winFrom = meta && meta.from, winTo = meta && meta.to;
   React.useEffect(() => {
-    if (!sameday || !winFrom || !winTo || !ENDPOINT_URL) return;
+    if (cohort || !sameday || !winFrom || !winTo || !ENDPOINT_URL) return;
     setSdFetch(s => ({ ...s, loading: true, error: null }));
     fetch(`${ENDPOINT_URL}?${authParam_()}&from=${winFrom}&to=${winTo}&only=retfaixa&sameday=1`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(j => { if (j.error) throw new Error(j.error); setSdFetch({ rows: j.retencaoFaixa || [], loading: false, error: null }); })
       .catch(e => setSdFetch({ rows: null, loading: false, error: String(e.message || e) }));
-  }, [sameday, winFrom, winTo]);
-  const srcRF = sameday ? (sdFetch.rows || []) : retencaoFaixa;
+  }, [cohort, sameday, winFrom, winTo]);
+  // Cohort view: puxa o PRÓPRIO último ciclo de 30 dias FECHADO (independe do slicer global, igual ao Benchmark).
+  // Busca [dataMax-60, dataMax]; mostra só coortes com FTD <= dataMax-30 (já fecharam os 30 dias) e troca o
+  // M0 da tabela pela janela fixa de 30 dias (cntD30/valD30).
+  const dataMax = meta && meta.dataMaxDate;
+  const completeBefore = dataMax ? isoAddDays_(dataMax, -30) : null;
+  const [coFetch, setCoFetch] = React.useState({ rows: null, loading: false, error: null });
+  React.useEffect(() => {
+    if (!cohort || !dataMax || !ENDPOINT_URL) return;
+    const from = isoAddDays_(dataMax, -60), to = dataMax;
+    setCoFetch(s => ({ ...s, loading: true, error: null }));
+    fetch(`${ENDPOINT_URL}?${authParam_()}&from=${from}&to=${to}&only=retfaixa${sameday ? '&sameday=1' : ''}`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(j => { if (j.error) throw new Error(j.error); setCoFetch({ rows: j.retencaoFaixa || [], loading: false, error: null }); })
+      .catch(e => setCoFetch({ rows: null, loading: false, error: String(e.message || e) }));
+  }, [cohort, dataMax, sameday]);
+  // Fonte: coorte (fetch próprio · só coortes fechadas · M0 = janela de 30 dias) · same-day · padrão (slicer global).
+  let srcRF;
+  if (cohort) {
+    srcRF = (coFetch.rows || [])
+      .filter(r => completeBefore && r.date <= completeBefore)     // só coortes que já fecharam os 30 dias
+      .map(r => ({ ...r, cntM0: r.cntD30, valM0: r.valD30 }));     // M0 da tabela = janela fixa de 30 dias
+  } else {
+    srcRF = sameday ? (sdFetch.rows || []) : retencaoFaixa;
+  }
   const data = aggRetFaixaBench_(srcRF, chFilter, faixa, mode, gran);
   const t = data.totals || {};
   // CAC do escopo (independe da faixa — investimento não é segmentado por faixa de FTD): Σspend ÷ Σ FTD qtd.
   let sScope = 0, qScope = 0;
   (channels || []).forEach(c => { if (c.spend != null) { sScope += c.spend; qScope += (c.ftdQty || 0); } });
   const cac = qScope > 0 ? sScope / qScope : null;
-  const paybackM0 = (cac && t.m0PerPlayer != null) ? t.m0PerPlayer / cac : null; // quantas vezes o CAC voltou em M0
+  const paybackM0 = (!cohort && cac && t.m0PerPlayer != null) ? t.m0PerPlayer / cac : null; // CAC vem da janela global → não casa com a coorte de 30d, então off em Cohort view
   // BP do escopo (Total/Growth/canal). Só faz sentido p/ "Todas as faixas" — o plano não tem meta
   // por faixa de FTD. M0/FTD do plano = depM0÷ftdAmount · FTD médio do plano = ftdAmount÷ftd.
   // Total da Casa usa os totais "tt" do house (M0 tt / FTD tt — inclui não-growth, bate com o ACT
@@ -1514,16 +1545,19 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
       bpScope = { m0: h.m0tt, ftdAmount: h.ftdAmountTt, ftd: h.ftdTt };
     }
   }
-  const showBp = faixa === 'all' && bpScope && !sameday;   // o plano não tem figura same-day → sem farol nesse modo
+  const showBp = faixa === 'all' && bpScope && !sameday && !cohort;   // sem figura de plano p/ same-day nem janela de 30d → farol off
   const bpMultM0F  = (showBp && bpScope.ftdAmount > 0) ? bpScope.m0 / bpScope.ftdAmount : null;
   const bpFtdMedio = (showBp && bpScope.ftd > 0) ? bpScope.ftdAmount / bpScope.ftd : null;
   const pb = (act, bpv) => (bpv && act != null) ? act / bpv : null;
   const heroes = [
-    { label: 'M0 / FTD', act: t.multM0F, m1: null, bp: bpMultM0F, pctBp: pb(t.multM0F, bpMultM0F), fmt: 'multiple' },      // (D0+M0) ÷ FTD
+    { label: cohort ? '30d / FTD' : 'M0 / FTD', act: t.multM0F, m1: null, bp: bpMultM0F, pctBp: pb(t.multM0F, bpMultM0F), fmt: 'multiple' },      // (D0+janela) ÷ FTD
     { label: 'FTD médio do período', act: t.ftdMedio, m1: null, bp: bpFtdMedio, pctBp: pb(t.ftdMedio, bpFtdMedio), fmt: 'brl' },
     { label: 'Payback M0 / CAC', act: paybackM0, m1: null, pctBp: null, fmt: 'multiple' },
   ];
   const chLabel = chLabel_(chFilter);
+  const coSuffix = cohort ? ` · coorte 30d (FTD até ${completeBefore ? completeBefore.slice(8, 10) + '/' + completeBefore.slice(5, 7) : '—'})` : '';
+  const loadingRF = (cohort && coFetch.loading) || (sameday && sdFetch.loading);
+  const errorRF = (cohort && coFetch.error) || (sameday && sdFetch.error);
   const selStyle = { background: 'var(--surface)', border: '1px solid rgba(250,204,21,.45)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' };
   return (
     <React.Fragment>
@@ -1553,18 +1587,24 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
             <button className={`preset-btn ${gran === 'day' ? 'active' : ''}`} onClick={() => setGran('day')} title="Uma linha por dia de FTD">Diário</button>
             <button className={`preset-btn ${gran === 'week' ? 'active' : ''}`} onClick={() => setGran('week')} title="Colapsa em semanas (seg–dom): re-agrega as bases e recalcula as métricas — não é média das %">Semanal</button>
           </div>
+          <label style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>M0</label>
+          <div className="slicer-presets">
+            <button className={`preset-btn ${!cohort ? 'active' : ''}`} onClick={() => setView('calendario')} title="M0 = depósito do dia do FTD até o FIM do mês-calendário (visão atual; coortes recentes ficam curtas).">Calendário</button>
+            <button className={`preset-btn ${cohort ? 'active' : ''}`} onClick={() => setView('coorte')} title="M0 = janela FIXA de 30 dias corridos do FTD; mostra só coortes que já fecharam os 30 dias (a mais recente ~30 dias atrás). Puxa o período sozinho, independe do slicer do topo.">Coorte 30d</button>
+          </div>
         </div>
       </div>
       <div className="hero-grid">
         {heroes.map((m, i) => <Hero key={i} metric={m} />)}
       </div>
       <div className="support">
-        <div className="support-title">Safra por {gran === 'week' ? 'Semana' : 'Dia'} · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{sameday ? ' · same-day' : ''}{sameday && sdFetch.loading ? ' · carregando…' : ''}{sameday && sdFetch.error ? ' · erro ao carregar' : ''}</div>
-        <RetFaixaTable data={data} dateLabel={gran === 'week' ? 'Semana' : 'Data FTD'} />
+        <div className="support-title">Safra por {gran === 'week' ? 'Semana' : 'Dia'} · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{sameday ? ' · same-day' : ''}{coSuffix}{loadingRF ? ' · carregando…' : ''}{errorRF ? ' · erro ao carregar' : ''}</div>
+        <RetFaixaTable data={data} dateLabel={gran === 'week' ? 'Semana' : 'Data FTD'} m0Label={cohort ? '30d' : 'M0'} />
         <div className="ch-note">
           Cada linha = safra de FTD daquele dia, na faixa selecionada. <strong>FTD $$</strong> = ticket médio do FTD · <strong>Dep D0 Med</strong> = depósito médio no D0.
           <strong> Mult X/FTD</strong> = depósito acumulado (incl. D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+dias 1–14)/FTD · (D0+resto do mês)/FTD.
           <strong> D1/W1/W2/M0 Ret</strong> (<span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelo</span>) = retenção acumulada vs D0 — modo <strong>Valor</strong> = $ da janela ÷ D0 em % (pode passar de 100%); modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar. Canal e data seguem o slicer global do topo; <strong>Coorte Same-day</strong> = só FTDs que depositaram no mesmo dia do cadastro.
+          <br /><strong>M0 Calendário</strong> = depósito até o fim do mês do FTD (visão atual). <strong>Coorte 30d</strong> = janela fixa de 30 dias corridos do FTD, mostrando só as coortes que já fecharam o ciclo (puxa o período sozinho, ~30 dias atrás) — comparação justa, independente do calendário.
         </div>
       </div>
     </React.Fragment>
