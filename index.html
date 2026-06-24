@@ -296,6 +296,22 @@
     color: var(--text-dim); max-width: 880px;
   }
   .ch-note strong { color: var(--text-muted); font-weight: 600; }
+  /* FTD bridge (waterfall BP → Realizado) */
+  .bridge-head { display: flex; align-items: baseline; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .bridge-head .b-act { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  .bridge-head .b-bp { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .bridge-head .b-delta { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bridge-head .b-delta.verde { color: var(--positive); }
+  .bridge-head .b-delta.amarelo { color: var(--warning); }
+  .bridge-head .b-delta.vermelho { color: var(--negative); }
+  .bridge-head .b-delta.cinza { color: var(--text-muted); }
+  .bridge-head .b-extra { font-size: 11px; color: var(--text-dim); }
+  .bridge-toggle { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; align-self: center; }
+  .bridge-toggle button { background: transparent; border: none; color: var(--text-muted); font-family: inherit; font-size: 11px; padding: 4px 11px; cursor: pointer; }
+  .bridge-toggle button:hover { color: var(--text); }
+  .bridge-toggle button.active { background: var(--accent-yellow); color: #000; font-weight: 600; }
+  .bridge-svg { display: block; }
+  .bridge-svg text { font-variant-numeric: tabular-nums; }
   /* Composition bars */
   .hbar-list { display: flex; flex-direction: column; gap: 12px; }
   .hbar {
@@ -473,6 +489,18 @@ const MOCK_CHANNELS = [
   { channel: 'Social Media',  spend: null,    ftdQty: 1840,  ftdAmount: 96300,   depD0: 152400 },
   { channel: 'Orgânico (sem atribuição)', spend: null, ftdQty: 5420, ftdAmount: 318700, depD0: 540900 },
 ];
+
+// Mock — BP por canal (modo dev). Live vem de payload.bp. Só byChannel é usado pela UI
+// (ChannelTable + FtdBridge): ftdAmount = FTD R$ planejado · invest/ftd/depD0/depM0 = plano.
+// Só os canais Growth têm plano (espelha o BP real); orgânico/afiliados/social ficam sem.
+const MOCK_BP = {
+  byChannel: {
+    'Meta':   { invest: 1700000, ftdAmount: 1500000, ftd: 14000, depD0: 2100000, depM0: 3200000 },
+    'Google': { invest: 1050000, ftdAmount: 600000,  ftd: 9000,  depD0: 1150000, depM0: 1900000 },
+    'TikTok': { invest: 480000,  ftdAmount: 420000,  ftd: 4800,  depD0: 470000,  depM0: 720000 },
+    'Kwai':   { invest: 150000,  ftdAmount: 70000,   ftd: 2500,  depD0: 140000,  depM0: 250000 },
+  },
+};
 
 // Mock — GGR por canal (modo dev). Live vem de payload.ggrChannels.
 // "GGR" do negócio = ngr_total da player_metrics (regra Apostou).
@@ -970,6 +998,126 @@ function RetentionTable({ channels, totalM3plus }) {
 // TABS — 3 KPIs hero + viz de apoio
 // ============================================================
 
+// ============================================================
+// FTD BRIDGE — waterfall de variância BP → Realizado por canal
+//   Start = Σ BP.ftdAmount (canais com plano) · cada degrau = (Realizado − BP) do canal
+//   Canais sem BP (orgânico/afiliados/social) viram um balde "Outros (s/ BP)".
+//   End = Σ Realizado.ftdAmount (bate com o total da tabela por canal).
+// ============================================================
+function FtdBridge({ channels, bp }) {
+  const [axis, setAxis] = React.useState('zero');   // 'zero' = baseline no zero (proporção real) · 'zoom' = amplia os degraus
+  const byCh = (bp && bp.byChannel) || {};
+  let bpTotal = 0, actTotal = 0, noBpAct = 0;
+  const steps = [];
+  channels.forEach(c => {
+    const act = c.ftdAmount || 0;
+    actTotal += act;
+    const b = byCh[c.channel];
+    if (b && b.ftdAmount != null && b.ftdAmount > 0) {
+      bpTotal += b.ftdAmount;
+      steps.push({ name: c.channel, delta: act - b.ftdAmount });
+    } else {
+      noBpAct += act;
+    }
+  });
+  steps.sort((a, b) => b.delta - a.delta);   // maiores ganhos → maiores quedas
+  const hasBucket = noBpAct > 0;
+  if (hasBucket) steps.push({ name: 'Outros (s/ BP)', delta: noBpAct, bucket: true });
+
+  // Sem BP por canal no escopo → não há plano pra fazer a ponte.
+  if (bpTotal <= 0) {
+    return <div className="ch-note">Ponte indisponível — não há BP por canal neste escopo (o plano cobre só os canais Growth). Selecione <strong>“Canais Growth”</strong> ou um canal com plano de mídia.</div>;
+  }
+
+  // Barras: BP (do zero) → degraus flutuantes → Realizado (do zero).
+  const bars = [{ kind: 'bp', name: 'BP (plano)', value: bpTotal, endLevel: bpTotal, lo: 0, hi: bpTotal }];
+  let run = bpTotal;
+  steps.forEach(s => { const next = run + s.delta; bars.push({ kind: 'step', name: s.name, delta: s.delta, bucket: s.bucket, lo: Math.min(run, next), hi: Math.max(run, next), endLevel: next }); run = next; });
+  bars.push({ kind: 'act', name: 'Realizado', value: actTotal, endLevel: actTotal, lo: 0, hi: actTotal });
+
+  // Escala vertical: 'zero' = baseline no zero (proporção real) · 'zoom' = amplia a faixa dos degraus.
+  const endLevels = bars.map(b => b.endLevel);
+  let domMin, domMax;
+  if (axis === 'zoom') {
+    const lo = Math.min.apply(null, endLevels), hi = Math.max.apply(null, endLevels);
+    const pad = Math.max((hi - lo) * 0.16, hi * 0.015);   // piso de folga p/ não estourar quando a variância é ínfima
+    domMin = lo - pad; domMax = hi + pad;
+  } else {
+    const allLevels = bars.map(b => b.hi).concat(bars.map(b => b.lo)).concat([0]);
+    domMin = Math.min(0, Math.min.apply(null, allLevels));
+    domMax = Math.max.apply(null, allLevels) * 1.14;
+  }
+  const PH = 240, topPad = 44, botPad = 72, slotW = 108, barW = 60;
+  const W = bars.length * slotW, H = PH + topPad + botPad;
+  const yName = topPad + PH + 24;
+  const y = (v) => topPad + (1 - (v - domMin) / (domMax - domMin)) * PH;
+  const cx = (i) => i * slotW + slotW / 2;
+
+  const fmtDelta = (n) => (n > 0 ? '+' : '') + fmtBRL(n);
+  const colorOf = (b) => {
+    if (b.kind === 'bp') return { fill: 'rgba(136,136,136,.16)', stroke: 'var(--text-muted)' };
+    if (b.kind === 'act') return { fill: 'rgba(250,204,21,.16)', stroke: 'var(--accent-yellow)' };
+    if (b.bucket) return { fill: 'rgba(96,165,250,.18)', stroke: 'var(--accent)' };
+    return b.delta >= 0
+      ? { fill: 'rgba(74,222,128,.20)', stroke: 'var(--positive)' }
+      : { fill: 'rgba(248,113,113,.20)', stroke: 'var(--negative)' };
+  };
+
+  const net = actTotal - bpTotal;
+  const pct = bpTotal > 0 ? actTotal / bpTotal : null;
+  const band = farolFromPct(pct);
+
+  return (
+    <React.Fragment>
+      <div className="bridge-head">
+        <span className="b-act">{fmtBRL(actTotal)}</span>
+        <span className="b-bp">vs BP {fmtBRL(bpTotal)}</span>
+        <span className={`b-delta ${band}`}>{fmtDelta(net)} · {fmtPct(pct)} do plano</span>
+        {hasBucket && <span className="b-extra">inclui {fmtBRL(noBpAct)} de canais sem plano (orgânico/afiliados/social)</span>}
+        <span className="bridge-toggle">
+          <button className={axis === 'zero' ? 'active' : ''} onClick={() => setAxis('zero')} title="Eixo começa no zero — proporção real entre as barras">Zero</button>
+          <button className={axis === 'zoom' ? 'active' : ''} onClick={() => setAxis('zoom')} title="Amplia os degraus — eixo não começa no zero">Zoom</button>
+        </span>
+      </div>
+      <div className="table-scroll">
+        <svg className="bridge-svg" viewBox={`0 0 ${W} ${H}`} width={W} style={{ width: '100%', maxWidth: W, minWidth: Math.min(W, 560), height: 'auto' }} preserveAspectRatio="xMidYMid meet">
+          {/* linha de referência do plano (BP) */}
+          <line x1={0} x2={W} y1={y(bpTotal)} y2={y(bpTotal)} stroke="var(--border-strong)" strokeWidth="1" strokeDasharray="2 4" />
+          <text x={W - 4} y={y(bpTotal) - 5} textAnchor="end" fontSize="9.5" fill="var(--text-dim)">plano</text>
+          {/* conectores entre o nível corrente de cada barra */}
+          {bars.slice(0, -1).map((b, i) => (
+            <line key={`c${i}`} x1={cx(i) + barW / 2} x2={cx(i + 1) - barW / 2} y1={y(b.endLevel)} y2={y(b.endLevel)} stroke="var(--text-dim)" strokeWidth="1" strokeDasharray="3 3" />
+          ))}
+          {/* baseline zero (modo zero) · nota de eixo deslocado (modo zoom) */}
+          {axis === 'zero'
+            ? <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="var(--border)" strokeWidth="1" />
+            : <text x={2} y={topPad + PH + 46} fontSize="10.5" fill="var(--text-dim)">eixo inicia em {fmtBRL(domMin)} — degraus ampliados</text>}
+          {/* barras + rótulos */}
+          {bars.map((b, i) => {
+            const col = colorOf(b);
+            // degraus ocupam [lo,hi]; totais (BP/Realizado) descem até o piso do eixo (zero ou domMin no zoom)
+            const top = y(b.hi), h = Math.max(2, (b.kind === 'step' ? y(b.lo) : y(domMin)) - y(b.hi));
+            const isTotal = b.kind === 'bp' || b.kind === 'act';
+            const labelVal = isTotal ? fmtBRL(b.value) : fmtDelta(b.delta);
+            return (
+              <g key={i}>
+                <rect x={cx(i) - barW / 2} y={top} width={barW} height={h} rx="2" fill={col.fill} stroke={col.stroke} strokeWidth="1.5" />
+                <text x={cx(i)} y={top - 8} textAnchor="middle" fontSize="11" fontWeight={isTotal ? 700 : 600} fill={isTotal ? 'var(--text)' : col.stroke}>{labelVal}</text>
+                <text x={cx(i)} y={yName} textAnchor="middle" fontSize="10.5" fill="var(--text-muted)">{b.name}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="ch-note">
+        <strong>Ponte de variância FTD (R$):</strong> parte do <strong>BP</strong> (FTD planejado, somado nos canais com plano de mídia) e acumula a diferença <strong>Realizado − BP</strong> de cada canal até o <strong>Realizado</strong>. Verde = acima do plano · vermelho = abaixo.
+        {hasBucket && <> O balde <strong>“Outros (s/ BP)”</strong> reúne canais sem plano de mídia (orgânico, afiliados, social) — entram pelo valor cheio por não terem BP; troque o filtro para <strong>“Canais Growth”</strong> para a ponte pura de mídia paga.</>}
+        {' '}Acompanha o filtro de canal e bate com o total da tabela abaixo.
+      </div>
+    </React.Fragment>
+  );
+}
+
 function TabAquisicao({ M, channels, bp }) {
   return (
     <React.Fragment>
@@ -984,6 +1132,12 @@ function TabAquisicao({ M, channels, bp }) {
         <Hero metric={M.roasFtd} />
         <Hero metric={M.invest} />
       </div>
+      {channels && channels.length > 0 && (
+        <div className="support">
+          <div className="support-title">Ponte FTD — BP → Realizado por Canal</div>
+          <FtdBridge channels={channels} bp={bp} />
+        </div>
+      )}
       {channels && channels.length > 0 && (
         <div className="support">
           <div className="support-title">Análise por Canal</div>
@@ -2416,7 +2570,7 @@ function App({ user, onLogout }) {
     componentsByChannel: null,
     depM0Channels: MOCK_DEPM0_CHANNELS,
     rolloverMatrix: MOCK_ROLLOVER_MATRIX,
-    bp: null,
+    bp: MOCK_BP,
     isLive: false,
     benchmark: null,           // benchmark.json (3 casas, Excel estático)
     benchmarkSameday: null,    // benchmark_sameday.json (só Lottu, coorte same-day)
