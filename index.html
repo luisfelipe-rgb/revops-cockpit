@@ -1428,11 +1428,16 @@ function monthEndRunway_(iso) {
   const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
   return Math.max(0, Math.min(30, lastDay - d));
 }
+// dias de a até b (b - a).
+function isoDiffDays_(a, b) {
+  const pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000);
+}
 
 // Agrega retencaoFaixa por DIA ou SEMANA (gran='day'|'week'; canal via chFilter + faixa) no padrão do
 // Benchmark (benchMetrics_). SEMANAL re-agrega as bases aditivas e RECALCULA as métricas (não é média
 // das %). mode 'qtd'|'val' afeta só as colunas de retenção. ggrM0/m0PerPlayer ficam p/ ROAS GGR e heroes.
-function aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode, gran, gCurve) {
+function aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode, gran, gCurve, dataMax) {
   const rows = benchApostouRows_(retencaoFaixa);
   const selCh = chSelector_(chFilter);
   const selFx = (fx) => faixa === 'all' || fx === faixa;
@@ -1445,10 +1450,14 @@ function aggRetFaixaBench_(retencaoFaixa, chFilter, faixa, mode, gran, gCurve) {
     const b = weekly ? weekStartISO_(r.date) : r.date;
     if (!by[b]) by[b] = zero();
     keys.forEach(k => { by[b][k] += r[k] || 0; tot[k] += r[k] || 0; });
-    // M0 ESPERADO: depósito projetado até o fim do mês = FTD$ × G(runway). runway = dias do FTD até o
-    // último dia do mês. Só acumula quando há curva (escopo Total/Growth, visão calendário).
+    // M0 ESPERADO (ancorado no realizado): pega o que a coorte JÁ depositou (realized = D0 + M0-até-hoje)
+    // e completa só o runway que falta usando a forma da curva: realized × G(runway) ÷ G(idade atual).
+    // Em mês fechado idade ≥ runway → vira o próprio realizado. Respeita junho rodar abaixo de maio.
     if (gCurve) {
-      const rw = monthEndRunway_(r.date), e = (r.ftd || 0) * (gCurve[rw] || 0);
+      const rw = monthEndRunway_(r.date);
+      const age = Math.max(0, Math.min(rw, dataMax ? isoDiffDays_(r.date, dataMax) : rw));
+      const realized = (r.d0 || 0) + (r.vm0 || 0);
+      const e = (gCurve[age] > 0) ? realized * gCurve[rw] / gCurve[age] : realized;
       by[b]._esp += e; tot._esp += e;
       [by[b], tot].forEach(o => { o._rwMin = o._rwMin == null ? rw : Math.min(o._rwMin, rw); o._rwMax = o._rwMax == null ? rw : Math.max(o._rwMax, rw); });
     }
@@ -1470,7 +1479,7 @@ function RetFaixaTable({ data, dateLabel, m0Label }) {
   const espCell = (r) => {
     if (r.m0Esp == null) return <td key="esp" style={{ color: 'var(--text-muted)' }}>—</td>;
     const rw = (r.rwMin != null && r.rwMax != null) ? (r.rwMin === r.rwMax ? `${r.rwMax}` : `${r.rwMax}→${r.rwMin}`) : '—';
-    const tip = `M0/FTD esperado no fechamento = Σ FTD$ × G(runway) ÷ FTD$. Runway (dias até o fim do mês) desta linha: ${rw}.`;
+    const tip = `M0/FTD esperado no fechamento, ancorado no realizado: realizado × G(runway) ÷ G(idade), somado e dividido pelo FTD$. Runway (dias até o fim do mês) desta linha: ${rw}.`;
     return <td key="esp" style={{ color: 'var(--accent-yellow)', fontWeight: 500 }} title={tip}>{fmtMultiple(r.m0Esp)}</td>;
   };
   const dm = (s) => { if (!s || s === 'Total') return s || '—'; const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s)); return m ? `${m[3]}/${m[2]}` : String(s); };
@@ -1507,7 +1516,7 @@ function RetFaixaTable({ data, dateLabel, m0Label }) {
         <tr>
           <th>{dateLabel || 'Data FTD'}</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
           <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult W2/FTD</th><th>Mult {mL}/FTD</th>
-          <th title="M0/FTD esperado no fechamento do mês = Σ FTD$ × G(runway até o fim do mês) ÷ FTD$. G = curva histórica de desenvolvimento (maio), por escopo (Total/Growth).">M0 Esp.</th>
+          <th title="M0/FTD esperado no fechamento, ancorado no realizado: realizado × G(runway) ÷ G(idade). G = curva histórica de desenvolvimento (maio), por escopo (Total/Growth).">M0 Esp.</th>
           <th style={retThL}>D1 Ret %</th><th style={retTh}>W1 Ret %</th><th style={retTh}>W2 Ret %</th><th style={retTh}>{mL} Ret %</th>
         </tr>
       </thead>
@@ -1623,7 +1632,7 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
   // Coluna "M0 Esperado": curva G do escopo (Total/Growth; canal específico → null). Só na visão
   // calendário, coorte normal (não 30d, não same-day) — senão runway/curva não se aplicam.
   const gCurve = (!cohort && !sameday) ? m0Curve_(chFilter) : null;
-  const data = aggRetFaixaBench_(srcRF, chFilter, faixa, mode, gran, gCurve);
+  const data = aggRetFaixaBench_(srcRF, chFilter, faixa, mode, gran, gCurve, dataMax);
   const t = data.totals || {};
   // Mês anterior fechado: mesmo recorte (canal/faixa/modo) num único agregado (.totals). Sem curva (já maduro).
   const pmRow = pmFetch.rows ? aggRetFaixaBench_(pmFetch.rows, chFilter, faixa, mode, 'day').totals : null;
@@ -1714,7 +1723,7 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
         <div className="ch-note">
           Cada linha = safra de FTD daquele dia, na faixa selecionada. <strong>FTD $$</strong> = ticket médio do FTD · <strong>Dep D0 Med</strong> = depósito médio no D0.
           <strong> Mult X/FTD</strong> = depósito acumulado (incl. D0) até a janela ÷ valor do FTD: D0/FTD · (D0+dia 1)/FTD · (D0+dias 1–7)/FTD · (D0+dias 1–14)/FTD · (D0+resto do mês)/FTD.
-          <br /><strong>M0 Esp. — como é calculado:</strong> é o M0/FTD esperado no <strong>fechamento do mês</strong>. Para cada dia de FTD: <strong>M0 esperado(dia) = FTD$ × G(runway)</strong>, onde <strong>runway</strong> = dias do FTD até o fim do mês-calendário, e <strong>G(n)</strong> = quanto R$1 de FTD vira em depósito acumulado em <em>n</em> dias (curva histórica de maio, coortes maduras — <strong>validada: reconstrói o M0 realizado de maio com +1%</strong>). A semana soma os dias e divide pelo FTD$. Safra do fim do mês tem runway curto → desenvolve menos (múltiplo menor). A curva <strong>G muda por escopo</strong> (Growth desenvolve mais que Total da Casa — ticket menor); canal específico ainda não tem curva própria (→ —). Aparece só na visão <strong>Calendário</strong> (não em Coorte 30d / Same-day).
+          <br /><strong>M0 Esp. — como é calculado:</strong> M0/FTD esperado no <strong>fechamento do mês</strong>, <strong>ancorado no que a safra JÁ depositou</strong>. Por dia de FTD: <strong>esperado = realizado × G(runway) ÷ G(idade)</strong> — pega o depósito real até hoje e completa só o runway que falta pela forma da curva. <strong>runway</strong> = dias do FTD até o fim do mês · <strong>idade</strong> = dias desde o FTD · <strong>G(n)</strong> = depósito acumulado ÷ FTD em <em>n</em> dias (curva histórica de maio, coortes maduras). Ancorar no realizado evita superprojetar (junho roda abaixo de maio) — em mês fechado o esperado vira o próprio realizado. Safra do fim do mês tem runway curto → múltiplo menor. <strong>G muda por escopo</strong> (Growth desenvolve mais que Total da Casa); canal específico ainda sem curva (→ —). Só na visão <strong>Calendário</strong>.
           <strong> D1/W1/W2/M0 Ret</strong> (<span style={{ background: 'rgba(250,204,21,0.25)', padding: '0 4px', borderRadius: '3px' }}>amarelo</span>) = retenção acumulada vs D0 — modo <strong>Valor</strong> = $ da janela ÷ D0 em % (pode passar de 100%); modo <strong>Qtd</strong> = % dos FTDs que voltaram a depositar. Canal e data seguem o slicer global do topo; <strong>Coorte Same-day</strong> = só FTDs que depositaram no mesmo dia do cadastro.
           <br /><strong>M0 Calendário</strong> = depósito até o fim do mês do FTD (visão atual). <strong>Coorte 30d</strong> = janela fixa de 30 dias corridos do FTD, mostrando só as coortes que já fecharam o ciclo (puxa o período sozinho, ~30 dias atrás) — comparação justa, independente do calendário.
         </div>
