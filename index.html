@@ -1479,6 +1479,48 @@ function RetFaixaTable({ data, dateLabel, m0Label }) {
   );
 }
 
+// Linha de REFERÊNCIA — mês-calendário anterior FECHADO, mesmas colunas/formato da RetFaixaTable
+// num único registro agregado. Respeita canal/faixa/modo/same-day (vem do mesmo aggRetFaixaBench_),
+// mas SEMPRE M0 = mês-calendário (já maduro), independente do toggle Calendário/Coorte do topo.
+function RetFaixaPrevRow({ row, label, loading, error }) {
+  const retTh = { background: 'linear-gradient(rgba(250,204,21,0.20),rgba(250,204,21,0.20)), var(--surface-2)' };
+  const retThL = { ...retTh, borderLeft: '2px solid rgba(250,204,21,0.55)' };
+  const flat = { background: 'rgba(250,204,21,0.10)' };
+  const flatL = { ...flat, borderLeft: '2px solid rgba(250,204,21,0.45)' };
+  const r = row || {};
+  const ready = !!row && !loading && !error;
+  return (
+    <div className="table-scroll"><table className="ch-table">
+      <thead>
+        <tr>
+          <th>Mês</th><th>Qtd FTD</th><th>FTD $$</th><th>Dep D0 Med</th>
+          <th>Mult D0/FTD</th><th>Mult D1/FTD</th><th>Mult W1/FTD</th><th>Mult W2/FTD</th><th>Mult M0/FTD</th>
+          <th style={retThL}>D1 Ret %</th><th style={retTh}>W1 Ret %</th><th style={retTh}>W2 Ret %</th><th style={retTh}>M0 Ret %</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td className="ch-name">{label}</td>
+          {ready ? [
+            <td key="q">{fmtQty(r.qtd)}</td>,
+            <td key="ftd">{fmtBRL(r.ftdMedio)}</td>,
+            <td key="d0">{fmtBRL(r.d0Medio)}</td>,
+            <td key="d0f">{fmtMultiple(r.multD0F)}</td>,
+            <td key="d1f">{fmtMultiple(r.multD1F)}</td>,
+            <td key="w1f">{fmtMultiple(r.multW1F)}</td>,
+            <td key="w2f">{fmtMultiple(r.multW2F)}</td>,
+            <td key="m0f">{fmtMultiple(r.multM0F)}</td>,
+            <td key="r1" style={flatL}>{fmtPct(r.retD1, 1)}</td>,
+            <td key="rw1" style={flat}>{fmtPct(r.retW1, 1)}</td>,
+            <td key="rw2" style={flat}>{fmtPct(r.retW2, 1)}</td>,
+            <td key="rm0" style={flat}>{fmtPct(r.retM0, 1)}</td>,
+          ] : <td colSpan={12} style={{ color: 'var(--text-muted)' }}>{error ? 'erro ao carregar' : (loading ? 'carregando…' : '—')}</td>}
+        </tr>
+      </tbody>
+    </table></div>
+  );
+}
+
 function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
   const [faixa, setFaixa] = React.useState('all');
   const [mode, setMode] = React.useState('qtd');   // 'qtd' (% redepositou) | 'val' (% do depósito sobre o D0)
@@ -1512,6 +1554,19 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
       .then(j => { if (j.error) throw new Error(j.error); setCoFetch({ rows: j.retencaoFaixa || [], loading: false, error: null }); })
       .catch(e => setCoFetch({ rows: null, loading: false, error: String(e.message || e) }));
   }, [cohort, dataMax, sameday]);
+  // Linha de referência do MÊS-CALENDÁRIO ANTERIOR fechado (ex.: junho → maio). Puxa o próprio período
+  // (independe do slicer global, igual à coorte) via only=retfaixa; respeita o toggle same-day. M0 sempre
+  // calendário (mês fechado = maduro). Sem custo quando o backend já cacheou a janela.
+  const pm = React.useMemo(() => lastMonthRangeISO_(), []);
+  const [pmFetch, setPmFetch] = React.useState({ rows: null, loading: false, error: null });
+  React.useEffect(() => {
+    if (!ENDPOINT_URL || !pm) return;
+    setPmFetch(s => ({ ...s, loading: true, error: null }));
+    fetch(`${ENDPOINT_URL}?${authParam_()}&from=${pm.from}&to=${pm.to}&only=retfaixa${sameday ? '&sameday=1' : ''}`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(j => { if (j.error) throw new Error(j.error); setPmFetch({ rows: j.retencaoFaixa || [], loading: false, error: null }); })
+      .catch(e => setPmFetch({ rows: null, loading: false, error: String(e.message || e) }));
+  }, [pm, sameday]);
   // Fonte: coorte (fetch próprio · só coortes fechadas · M0 = janela de 30 dias) · same-day · padrão (slicer global).
   let srcRF;
   if (cohort) {
@@ -1523,6 +1578,8 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
   }
   const data = aggRetFaixaBench_(srcRF, chFilter, faixa, mode, gran);
   const t = data.totals || {};
+  // Mês anterior fechado: mesmo recorte (canal/faixa/modo) num único agregado (.totals).
+  const pmRow = pmFetch.rows ? aggRetFaixaBench_(pmFetch.rows, chFilter, faixa, mode, 'day').totals : null;
   // CAC do escopo (independe da faixa — investimento não é segmentado por faixa de FTD): Σspend ÷ Σ FTD qtd.
   let sScope = 0, qScope = 0;
   (channels || []).forEach(c => { if (c.spend != null) { sScope += c.spend; qScope += (c.ftdQty || 0); } });
@@ -1598,6 +1655,11 @@ function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
       </div>
       <div className="hero-grid">
         {heroes.map((m, i) => <Hero key={i} metric={m} />)}
+      </div>
+      <div className="support">
+        <div className="support-title">Mês anterior fechado · {monthLabelPt_(pm.from)} · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{sameday ? ' · same-day' : ''}{pmFetch.loading ? ' · carregando…' : ''}{pmFetch.error ? ' · erro ao carregar' : ''}</div>
+        <RetFaixaPrevRow row={pmRow} label={monthLabelPt_(pm.from)} loading={pmFetch.loading} error={pmFetch.error} />
+        <div className="ch-note">Referência do último mês-calendário <strong>fechado</strong> ({monthLabelPt_(pm.from)}), com M0 já maduro, no mesmo recorte de canal/faixa/modo. <strong>Independe do slicer de data do topo</strong> e o M0 é sempre mês-calendário (não muda com o toggle Calendário/Coorte).</div>
       </div>
       <div className="support">
         <div className="support-title">Safra por {gran === 'week' ? 'Semana' : 'Dia'} · {chLabel} · {faixa === 'all' ? 'todas as faixas' : fxLabel_(faixa)}{sameday ? ' · same-day' : ''}{coSuffix}{loadingRF ? ' · carregando…' : ''}{errorRF ? ' · erro ao carregar' : ''}</div>
@@ -1985,6 +2047,12 @@ function fmtBR_(iso) {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
+}
+const MESES_PT_ = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+function monthLabelPt_(iso) {
+  if (!iso) return '—';
+  const [y, m] = String(iso).split('-').map(Number);
+  return `${MESES_PT_[(m - 1 + 12) % 12]}/${y}`;
 }
 
 // ============================================================
