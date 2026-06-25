@@ -2235,7 +2235,38 @@ function NetBenchTab({ benchmarkNet }) {
     subtitle="Ticket de FTD, depósito e CAIXA LÍQUIDO (depósito − saque) por faixa e canal — slicer Bruto/Líquido" />;
 }
 
+// Aba FAROL — visão consolidada: todos os indicadores em hero cards (vs M-1 e vs BP), em 4 grupos.
+// Reaproveita os cards do M (backend) + as métricas derivadas de buildFarolMetrics_ (farol).
+function TabFarol({ M, farol }) {
+  const f = farol || {};
+  const groups = [
+    { title: 'Aquisição', cards: [M.invest, M.roasFtd, f.roasDepD0, f.cac, f.ticketFtd] },
+    { title: 'Depósito M0', cards: [M.depM0Total, f.roasDepM0] },
+    { title: 'Retenção', cards: [M.retM0M1, M.retM1M2, M.retM3plus] },
+    { title: 'Volume & GGR', cards: [M.depTotal, M.ggr, M.ggrPerDep, M.rollover, f.freespinDep, f.bonusDep] },
+  ];
+  return (
+    <React.Fragment>
+      <div className="tab-header">
+        <div>
+          <h1>Farol</h1>
+          <div className="subtitle">Visão consolidada — todos os indicadores em cards, variação vs M-1 e vs BP</div>
+        </div>
+      </div>
+      {groups.map((g, i) => (
+        <div className="support" key={i}>
+          <div className="support-title">{g.title}</div>
+          <div className="hero-grid">
+            {g.cards.map((m, j) => (m ? <Hero key={j} metric={m} /> : null))}
+          </div>
+        </div>
+      ))}
+    </React.Fragment>
+  );
+}
+
 const TABS = [
+  { id: 'farol', label: 'Farol', component: TabFarol },
   { id: 'aquisicao', label: 'Aquisições', component: TabAquisicao },
   { id: 'safras', label: 'Safras Diárias', component: TabSafras },
   { id: 'retencao', label: 'Retenções', component: TabRetencao },
@@ -2397,6 +2428,46 @@ function deriveLiveM_(M, filter, comp, retCh, depCh, bp) {
     depM0Growth: mk(M.depM0Growth, depM0Growth || null, null),
   };
   return applyBpLive_(out, filter, bp);
+}
+
+// Farol — métricas DERIVADAS p/ a aba consolidada (não estão no M do backend): CAC, Tkt FTD, ROAS Dep
+// D0/M0, FreeSpins/Dep, Bonif/Dep. Calcula no escopo do filtro (igual aos outros cards). M-1 de CAC/Tkt
+// vem de componentsByChannel (ftdQty mtd+lm, só live; mock cai p/ channels e fica sem Δ). ROAS Dep D0 e
+// FreeSpins/Bonif não têm M-1 no front (dep_d0/freespin/bonus do mês anterior não chegam por canal) → Δ "—".
+// BP: CAC/Tkt/ROAS Dep D0/M0 saem do plano per-canal (bp.byChannel); FreeSpins/Bonif não têm meta → farol off.
+function buildFarolMetrics_(M, comp, channels, ggrChannels, bp, filter) {
+  const sel = chList_(filter);
+  const inSel = sel.length ? (ch) => sel.includes(ch)
+    : (filter && filter.scope === 'growth') ? (ch) => isGrowthCh_(ch) : () => true;
+  const sumComp = (bk, key) => {
+    if (!comp) return null; let s = 0, any = false;
+    Object.keys(comp).forEach(ch => { const v = comp[ch] && comp[ch][bk] && comp[ch][bk][key];
+      if (inSel(ch) && v != null) { s += v; any = true; } });
+    return any ? s : null;
+  };
+  const chFtdQty = (channels || []).filter(c => inSel(c.channel)).reduce((a, c) => a + (c.ftdQty || 0), 0) || null;
+  const fqM = sumComp('mtd', 'ftdQty');
+  const ftdQtyM = fqM != null ? fqM : chFtdQty;   // live: componentes (mtd) · mock: channels
+  const ftdQtyL = sumComp('lm', 'ftdQty');         // M-1 só no live
+  const depD0M = (channels || []).filter(c => inSel(c.channel) && c.spend != null).reduce((a, c) => a + (c.depD0 || 0), 0) || null;
+  const fs = (ggrChannels || []).filter(c => inSel(c.channel)).reduce((a, c) => a + (c.freespin || 0), 0) || null;
+  const bn = (ggrChannels || []).filter(c => inSel(c.channel)).reduce((a, c) => a + (c.bonus || 0), 0) || null;
+  const byCh = (bp && bp.byChannel) || {};
+  const B = {};
+  Object.keys(byCh).forEach(ch => { if (inSel(ch)) ['invest','ftdAmount','depD0','depM0','ftd'].forEach(k => { if (byCh[ch][k] != null) B[k] = (B[k] || 0) + byCh[ch][k]; }); });
+  const div = (a, b) => (a != null && b) ? a / b : null;
+  const mk = (label, fmt, act, bpv, m1) => ({ label, fmt, act: act == null ? null : act, m1: m1 == null ? null : m1,
+    bp: (bpv != null && isFinite(bpv) && bpv !== 0) ? bpv : null,
+    pctBp: (bpv && act != null) ? act / bpv : null });
+  const inv = M.invest || {}, fa = M.ftdAmount || {}, dt = M.depTotal || {}, dm0 = M.depM0Total || {};
+  return {
+    cac:         mk('CAC', 'brl', div(inv.act, ftdQtyM), div(B.invest, B.ftd), div(inv.m1, ftdQtyL)),
+    ticketFtd:   mk('Tkt Médio FTD', 'brl', div(fa.act, ftdQtyM), div(B.ftdAmount, B.ftd), div(fa.m1, ftdQtyL)),
+    roasDepD0:   mk('ROAS Dep D0', 'multiple', div(depD0M, inv.act), div(B.depD0, B.invest), null),
+    roasDepM0:   mk('ROAS Dep M0', 'multiple', div(dm0.act, inv.act), div(B.depM0, B.invest), div(dm0.m1, inv.m1)),
+    freespinDep: mk('FreeSpins / Dep', 'pct', div(fs, dt.act), null, null),
+    bonusDep:    mk('Bonificação / Dep', 'pct', div(bn, dt.act), null, null),
+  };
 }
 
 // Recalcula bp/pctBp dos hero cards conforme o escopo (growth ou canal específico).
@@ -2718,6 +2789,8 @@ function App({ user, onLogout }) {
   const displayM = state.isLive
     ? deriveLiveM_(state.M, chFilter, state.componentsByChannel, state.retentionChannels, state.depM0Channels, state.bp)
     : deriveMockM_(state.M, chFilter);
+  // Métricas derivadas da aba Farol (CAC, Tkt FTD, ROAS Dep D0/M0, FreeSpins/Bonif por dep) — escopo do filtro.
+  const farolMetrics = buildFarolMetrics_(displayM, state.componentsByChannel, state.channels, state.ggrChannels, state.bp, chFilter);
 
   function applyPreset(presetId) {
     const p = PRESETS.find(x => x.id === presetId);
@@ -2843,6 +2916,7 @@ function App({ user, onLogout }) {
         <Tab
           user={user}
           M={displayM}
+          farol={farolMetrics}
           channels={fChannels}
           bp={state.bp}
           retentionChannels={fRetentionChannels}
