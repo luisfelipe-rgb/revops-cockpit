@@ -1755,7 +1755,7 @@ function RetFaixaPrevRow({ row, label, loading, error }) {
 
 function TabRetencaoFaixa({ retencaoFaixa, chFilter, channels, bp, meta }) {
   const [faixa, setFaixa] = React.useState('all');
-  const [mode, setMode] = React.useState('qtd');   // 'qtd' (% redepositou) | 'val' (% do depósito sobre o D0)
+  const [mode, setMode] = React.useState('val');   // default Valor · 'val' (% do depósito sobre o D0) | 'qtd' (% redepositou)
   const [sameday, setSameday] = React.useState(false);  // só FTDs que depositaram no MESMO dia do cadastro
   const [gran, setGran] = React.useState('day');        // 'day' | 'week' (colapsa em médias semanais)
   const [view, setView] = React.useState('calendario'); // 'calendario' (M0 = fim do mês) | 'coorte' (M0 = 30 dias corridos, só coortes fechadas)
