@@ -250,6 +250,19 @@
   }
   .delta-m1 .up { color: var(--positive); }
   .delta-m1 .down { color: var(--negative); }
+  /* Trend = projeção de fechamento do mês (MTD × dias-do-mês/decorridos) */
+  .trend-line {
+    margin-top: 10px; display: flex; align-items: baseline; gap: 8px;
+    font-size: 11px; color: var(--text-muted);
+    padding-top: 8px; border-top: 1px dashed var(--border);
+  }
+  .trend-line .trend-tag { color: var(--text-dim); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .trend-line .trend-val { color: var(--text); font-weight: 700; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .trend-line .trend-pct { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: auto; }
+  .trend-line .trend-pct.verde { color: var(--positive); }
+  .trend-line .trend-pct.amarelo { color: var(--warning); }
+  .trend-line .trend-pct.vermelho { color: var(--negative); }
+  .trend-line .trend-pct.cinza { color: var(--text-dim); }
   /* Channel table */
   .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   /* Tabelas diárias longas (Safras, Ret.Faixa): scroll vertical próprio + cabeçalho/rodapé fixos.
@@ -649,6 +662,9 @@ function Hero({ metric }) {
   const farol = farolFromPct(pct);
   const deltaM1 = (metric.m1 != null && metric.act != null && metric.m1 !== 0)
     ? (metric.act - metric.m1) / metric.m1 : null;
+  // Trend = projeção de fechamento (já calculada no TabFarol p/ métricas aditivas). % = projeção ÷ BP cheio do mês.
+  const trendPct = (BP_FAROL_ON && metric.trend != null && metric.bp) ? metric.trend / metric.bp : null;
+  const trendFarol = farolFromPct(trendPct);
   return (
     <div className="hero">
       <div className="head">
@@ -662,6 +678,13 @@ function Hero({ metric }) {
             <span><span className="bp-label">BP</span> <span className="bp-val">{fmtVal(metric.bp, metric.fmt)}</span></span>
             <span className={`pct ${farol}`}>{fmtPct(pct, 0)}</span>
           </div>
+        </div>
+      )}
+      {metric.trend != null && (
+        <div className="trend-line" title="Projeção de fechamento do mês = MTD × (dias do mês ÷ dias decorridos)">
+          <span className="trend-tag">↗ Trend</span>
+          <span className="trend-val">{fmtVal(metric.trend, metric.fmt)}</span>
+          {trendPct != null && <span className={`trend-pct ${trendFarol}`}>{fmtPct(trendPct, 0)} BP</span>}
         </div>
       )}
       {deltaM1 != null && (
@@ -2248,14 +2271,35 @@ function NetBenchTab({ benchmarkNet }) {
 }
 
 // Aba FAROL — visão consolidada: todos os indicadores em hero cards (vs M-1 e vs BP), em 4 grupos.
+// Multiplicador de projeção de fechamento p/ uma janela MTD parcial: dias-do-mês ÷ dias-decorridos.
+// Só projeta quando a janela começa no dia 1 e termina antes do fim do mês (mesmo mês-calendário).
+// Fora disso (7d/30d/mês fechado/intervalo custom) → null = sem trend.
+function monthCloseMult_(range) {
+  if (!range || !range.from || !range.to) return null;
+  const [fy, fm, fd] = String(range.from).split('-').map(Number);
+  const [ty, tm, td] = String(range.to).split('-').map(Number);
+  if (fy !== ty || fm !== tm || fd !== 1) return null;     // não é MTD a partir do dia 1, no mesmo mês
+  const daysInMonth = new Date(ty, tm, 0).getDate();        // tm é 1-based → new Date(y, m, 0) = último dia do mês m
+  if (!(td > 0) || td >= daysInMonth) return null;          // mês já completo na janela → nada a projetar
+  return daysInMonth / td;
+}
+
 // Reaproveita os cards do M (backend) + as métricas derivadas de buildFarolMetrics_ (farol).
-function TabFarol({ M, farol }) {
+// Trend (projeção de fechamento) só vale p/ métricas ADITIVAS de volume (Investimento, DEP M0, Depósitos
+// Totais, GGR). Razões (ROAS, CAC, Tkt, retenção, rollover, %/Dep) não projetam por run-rate → sem trend.
+// Multiplicador = ggrTrend/ggr do backend (mesma base do card "Close Trend GGR"), com fallback pra janela.
+function TabFarol({ M, farol, range }) {
   const f = farol || {};
+  const mult = monthCloseMult_(range);
+  const tf = mult == null ? null
+    : (M.ggr && M.ggr.act && M.ggrTrend && M.ggrTrend.act != null && M.ggr.act !== 0)
+      ? M.ggrTrend.act / M.ggr.act : mult;
+  const withTrend = (m) => (m && tf != null && m.act != null) ? { ...m, trend: m.act * tf } : m;
   const groups = [
-    { title: 'Aquisição', cards: [M.invest, M.roasFtd, f.roasDepD0, f.cac, f.ticketFtd] },
-    { title: 'Depósito M0', cards: [M.depM0Total, f.roasDepM0] },
+    { title: 'Aquisição', cards: [withTrend(M.invest), M.roasFtd, f.roasDepD0, f.cac, f.ticketFtd] },
+    { title: 'Depósito M0', cards: [withTrend(M.depM0Total), f.roasDepM0] },
     { title: 'Retenção', cards: [M.retM0M1, M.retM1M2, M.retM3plus] },
-    { title: 'Volume & GGR', cards: [M.depTotal, M.ggr, M.ggrPerDep, M.rollover, f.freespinDep, f.bonusDep] },
+    { title: 'Volume & GGR', cards: [withTrend(M.depTotal), withTrend(M.ggr), M.ggrPerDep, M.rollover, f.freespinDep, f.bonusDep] },
   ];
   return (
     <React.Fragment>
@@ -2941,6 +2985,7 @@ function App({ user, onLogout }) {
           benchmarkSameday={state.benchmarkSameday}
           benchmarkNet={state.benchmarkNet}
           chFilter={chFilter}
+          range={appliedRange}
           depM0Channels={fDepM0Channels}
           depByChannel={fDepByChannel}
           rolloverMatrix={fRolloverMatrix}
