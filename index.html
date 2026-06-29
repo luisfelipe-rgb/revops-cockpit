@@ -128,7 +128,7 @@
   .slicer-arrow { color: var(--text-dim); font-size: 12px; }
   .slicer-presets { display: flex; gap: 4px; margin-left: 6px; }
   .preset-btn {
-    background: transparent; border: 1px solid var(--border);
+    background: rgba(250, 204, 21, .06); border: 1px solid rgba(250, 204, 21, .45);
     color: var(--text-muted); padding: 6px 12px; font-size: 11px;
     border-radius: 6px; cursor: pointer; font-family: inherit;
     transition: all .15s;
@@ -2030,10 +2030,11 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
   const [houseFrom, setHouseFrom] = React.useState(null);
   const [houseTo, setHouseTo] = React.useState(null);
 
-  // default das datas: mês-calendário mais recente (MTD) em cada lado, quando os dados chegam.
-  React.useEffect(() => { if (aptBounds) {
-    setAptFrom(aptBounds.max.slice(0, 7) + '-01'); setAptTo(aptBounds.max);
-  } }, [aptBounds]);
+  // default das datas: MTD (mês-calendário mais recente). Apostou segue o MESMO máximo geral (houseMax)
+  // das casas — senão fica travada no próprio dataMax (Apostou CSV pode estar mais atrás que a Lottu).
+  React.useEffect(() => { if (houseMax) {
+    setAptFrom(houseMax.slice(0, 7) + '-01'); setAptTo(houseMax);
+  } }, [houseMax]);
   React.useEffect(() => { if (houseMin && houseMax) {
     setHouseFrom(houseMax.slice(0, 7) + '-01'); setHouseTo(houseMax);
   } }, [houseMin, houseMax]);
@@ -2158,9 +2159,9 @@ function BenchmarkView({ retencaoFaixa, benchmark, houseOrder, sameday, title, s
         <div className="slicer-divider" />
         <div className="slicer-group">
           <label style={lblStyle}>Data Apostou</label>
-          <input type="date" value={aptFrom || ''} min={aptBounds ? aptBounds.min : undefined} max={aptTo || (aptBounds ? aptBounds.max : undefined)} onChange={e => setAptFrom(e.target.value)} />
+          <input type="date" value={aptFrom || ''} min={houseMin || undefined} max={aptTo || houseMax || undefined} onChange={e => setAptFrom(e.target.value)} />
           <span className="slicer-arrow">→</span>
-          <input type="date" value={aptTo || ''} min={aptFrom || (aptBounds ? aptBounds.min : undefined)} max={aptBounds ? aptBounds.max : undefined} onChange={e => setAptTo(e.target.value)} />
+          <input type="date" value={aptTo || ''} min={aptFrom || houseMin || undefined} max={houseMax || undefined} onChange={e => setAptTo(e.target.value)} />
         </div>
         <div className="slicer-group">
           <label style={lblStyle}>Data Demais Casas</label>
