@@ -2789,15 +2789,17 @@ function App({ user, onLogout }) {
 
   // Benchmark das casas concorrentes — arquivos estáticos servidos ao lado do index.html.
   useEffect(() => {
-    fetch('benchmark.json')
+    // cache:'no-cache' = revalida sempre (304 se igual) — evita date bounds/casas estagnados de versão antiga do JSON.
+    const opt = { cache: 'no-cache' };
+    fetch('benchmark.json', opt)
       .then(r => r.ok ? r.json() : null)
       .then(j => { if (j) setState(prev => ({ ...prev, benchmark: j })); })
       .catch(() => {});
-    fetch('benchmark_sameday.json')
+    fetch('benchmark_sameday.json', opt)
       .then(r => r.ok ? r.json() : null)
       .then(j => { if (j) setState(prev => ({ ...prev, benchmarkSameday: j })); })
       .catch(() => {});
-    fetch('benchmark_net.json')
+    fetch('benchmark_net.json', opt)
       .then(r => r.ok ? r.json() : null)
       .then(j => { if (j) setState(prev => ({ ...prev, benchmarkNet: j })); })
       .catch(() => {});
@@ -2883,7 +2885,20 @@ function App({ user, onLogout }) {
 
   // Aba Segurança só aparece p/ admin. Fallback p/ 1ª aba se o tabId persistido não existir no escopo.
   const visibleTabs = (user && user.admin) ? TABS.concat([{ id: 'seguranca', label: 'Segurança', component: SegurancaTab }]) : TABS;
-  const Tab = (visibleTabs.find(t => t.id === tabId) || visibleTabs[0]).component;
+  const activeTabId = visibleTabs.find(t => t.id === tabId) ? tabId : visibleTabs[0].id;
+  // Abas já visitadas ficam MONTADAS (escondidas via CSS) — não refazem fetch nem perdem estado/datas ao trocar.
+  // Montagem é LAZY: só monta a aba na 1ª visita (não dispara o fetch de todas no load).
+  const [visitedTabs, setVisitedTabs] = React.useState({});
+  React.useEffect(() => { setVisitedTabs(v => v[activeTabId] ? v : { ...v, [activeTabId]: true }); }, [activeTabId]);
+  const tabProps = {
+    user, M: displayM, farol: farolMetrics, channels: fChannels, bp: state.bp,
+    retentionChannels: fRetentionChannels, ggrChannels: fGgrChannels, ggrPayback: state.ggrPayback,
+    dailyCohort: selectDailyCohort_(state.dailyCohort, chFilter), retencaoFaixa: state.retencaoFaixa,
+    meta: state.meta, benchmark: state.benchmark, benchmarkSameday: state.benchmarkSameday,
+    benchmarkNet: state.benchmarkNet, chFilter, range: appliedRange,
+    depM0Channels: fDepM0Channels, depByChannel: fDepByChannel, rolloverMatrix: fRolloverMatrix,
+    isLive: state.isLive,
+  };
 
   return (
     <React.Fragment>
@@ -2986,28 +3001,14 @@ function App({ user, onLogout }) {
         ))}
       </nav>
       <main>
-        <Tab
-          user={user}
-          M={displayM}
-          farol={farolMetrics}
-          channels={fChannels}
-          bp={state.bp}
-          retentionChannels={fRetentionChannels}
-          ggrChannels={fGgrChannels}
-          ggrPayback={state.ggrPayback}
-          dailyCohort={selectDailyCohort_(state.dailyCohort, chFilter)}
-          retencaoFaixa={state.retencaoFaixa}
-          meta={state.meta}
-          benchmark={state.benchmark}
-          benchmarkSameday={state.benchmarkSameday}
-          benchmarkNet={state.benchmarkNet}
-          chFilter={chFilter}
-          range={appliedRange}
-          depM0Channels={fDepM0Channels}
-          depByChannel={fDepByChannel}
-          rolloverMatrix={fRolloverMatrix}
-          isLive={state.isLive}
-        />
+        {visibleTabs.filter(t => visitedTabs[t.id] || t.id === activeTabId).map(t => {
+          const Comp = t.component;
+          return (
+            <div key={t.id} style={{ display: t.id === activeTabId ? 'contents' : 'none' }}>
+              <Comp {...tabProps} />
+            </div>
+          );
+        })}
         <div className="footer">
           <span className="farol-key"><span className="dot verde" /> ≥ 95% BP</span>
           <span className="farol-key"><span className="dot amarelo" /> 85–94%</span>
