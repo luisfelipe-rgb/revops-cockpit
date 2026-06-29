@@ -1172,12 +1172,6 @@ function TabAquisicao({ M, channels, bp }) {
       </div>
       {channels && channels.length > 0 && (
         <div className="support">
-          <div className="support-title">Ponte FTD — BP → Realizado por Canal</div>
-          <FtdBridge channels={channels} bp={bp} />
-        </div>
-      )}
-      {channels && channels.length > 0 && (
-        <div className="support">
           <div className="support-title">Análise por Canal</div>
           <ChannelTable channels={channels} bp={bp} />
         </div>
