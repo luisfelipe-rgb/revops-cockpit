@@ -2290,7 +2290,7 @@ function monthCloseMult_(range) {
 
 // Reaproveita os cards do M (backend) + as métricas derivadas de buildFarolMetrics_ (farol).
 // Trend (projeção de fechamento): volumes ADITIVOS (Investimento, FTD, DEP M0, Depósitos, GGR) via run-rate;
-// ROAS FTD e Rollover via razão dos COMPONENTES projetados. Demais razões (CAC, Tkt, retenção, %/Dep) sem trend.
+// Rollover via razão dos COMPONENTES projetados. Demais razões (ROAS, CAC, Tkt, retenção, %/Dep) sem trend.
 // Multiplicador = ggrTrend/ggr do backend (mesma base do card "Close Trend GGR"), com fallback pra janela.
 function TabFarol({ M, farol, range }) {
   const f = farol || {};
@@ -2300,13 +2300,11 @@ function TabFarol({ M, farol, range }) {
       ? M.ggrTrend.act / M.ggr.act : mult;
   const proj = (m) => (m && tf != null && m.act != null) ? m.act * tf : null;   // valor projetado de fechamento
   const withTrend = (m) => { const t = proj(m); return (m && t != null) ? { ...m, trend: t } : m; };
-  // Razões: trend pela ROAS/rollover REAL dos componentes projetados (não run-rate da razão).
-  // ROAS FTD = FTD projetado ÷ Investimento projetado · Rollover = Turnover projetado ÷ Depósitos projetado.
+  // Razão: trend pelo Rollover REAL dos componentes projetados (Turnover proj ÷ Depósitos proj), não run-rate da razão.
   const withRatioTrend = (m, numProj, denProj) => (m && numProj != null && denProj) ? { ...m, trend: numProj / denProj } : m;
-  const roasFtdCard  = withRatioTrend(M.roasFtd, proj(M.ftdAmount), proj(M.invest));
   const rolloverCard = withRatioTrend(M.rollover, proj(M.turnover), proj(M.depTotal));
   const groups = [
-    { title: 'Aquisição', cards: [withTrend(M.invest), withTrend(M.ftdAmount), roasFtdCard, f.roasDepD0, f.cac, f.ticketFtd] },
+    { title: 'Aquisição', cards: [withTrend(M.invest), withTrend(M.ftdAmount), M.roasFtd, f.roasDepD0, f.cac, f.ticketFtd] },
     { title: 'Depósito M0', cards: [withTrend(M.depM0Total), f.roasDepM0] },
     { title: 'Retenção', cards: [M.retM0M1, M.retM1M2, M.retM3plus] },
     { title: 'Volume & GGR', cards: [withTrend(M.depTotal), withTrend(M.ggr), M.ggrPerDep, rolloverCard, f.freespinDep, f.bonusDep] },
